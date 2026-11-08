@@ -306,3 +306,17 @@ input[type="range"]::-webkit-slider-thumb {
 .stepper .num { width: 84px; text-align: center; font-variant-numeric: tabular-nums; padding: 0 6px; }
 .stepper button { width: 40px; height: 40px; border-radius: 13px; border: 1px solid var(--edge); background: var(--glass); color: var(--ink); font: inherit; font-size: 20px; padding: 0; }
 .stepper button:active { background: var(--glass-hi); }
+
+/* ---------- Secours : PC injoignable ---------- */
+.pad.recovery { justify-content: flex-start; align-items: stretch; text-align: left; overflow-y: auto; touch-action: pan-y; border-color: rgba(239, 138, 128, 0.3); }
+.pad.recovery::before { display: none; }
+.recovery-body { display: flex; flex-direction: column; gap: 10px; }
+.recovery h2 { margin: 0; font-size: 20px; letter-spacing: -0.02em; }
+.mono-line { margin: 0; font: 500 13px/1.3 ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink-dim); user-select: text; -webkit-user-select: text; }
+.reach { margin: 0; font-size: 14px; line-height: 1.4; color: var(--ink-dim); }
+.reach[data-reach="unreachable"] { color: var(--bad); }
+.reach[data-reach="reachable"] { color: var(--warn); }
+.recovery details { font-size: 13.5px; color: var(--ink-dim); }
+.recovery summary { cursor: pointer; color: var(--ink); }
+.recovery ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; line-height: 1.4; }
+.sheet .warn, .recovery .warn { color: var(--bad); font-size: 14px; margin: 8px 0 0; }

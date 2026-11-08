@@ -1,10 +1,10 @@
-import { Match, Show, Switch, createSignal } from "solid-js";
-import { parseScannedLink } from "../lib/identity";
+import { Match, Show, Switch, createEffect, createSignal, onCleanup } from "solid-js";
+import { forceUpdate } from "../lib/update";
 import type { RemoteController } from "../lib/remote";
 import { ActionPanel } from "./Actions";
 import { Keyboard } from "./Keyboard";
 import { Pad } from "./Pad";
-import { QrScanner } from "./QrScanner";
+import { Recovery, RescueActions, useScanner } from "./Recovery";
 import { SettingsSheet } from "./Settings";
 import { CenterIcon, DeckIcon, GearIcon, KeyboardIcon, LoupeIcon } from "./icons";
 
@@ -19,54 +19,34 @@ const Mark = () => (
 );
 
 function Pairing(props: { remote: RemoteController }) {
-  const [scanning, setScanning] = createSignal(false);
-  const [bad, setBad] = createSignal(false);
-  const onText = (text: string) => {
-    const link = parseScannedLink(text, location.origin);
-    if (!link) {
-      setBad(true);
-      return setScanning(false);
-    }
-    setScanning(false);
-    if (link.kind === "here") props.remote.start(link.code);
-    else location.href = link.url;
-  };
+  const scanner = useScanner(props.remote);
   return (
     <div class="center">
       <Mark />
       <h1>Associez votre PC</h1>
       <p>Lancez PwaMote sur l'ordinateur, puis scannez le QR code affiché dans sa fenêtre.</p>
-      <Show when={bad()}>
-        <p class="warn">Ce QR code n'est pas un code d'appairage PwaMote. Réessayez avec celui de la fenêtre du PC.</p>
-      </Show>
       <div class="row">
-        <button class="btn" onClick={() => (setBad(false), setScanning(true))}>
+        <button class="btn" onClick={scanner.open}>
           Scanner le QR code
         </button>
+        <button class="btn ghost" onClick={() => void forceUpdate()}>
+          Mettre à jour l'app
+        </button>
       </div>
-      <Show when={scanning()}>
-        <QrScanner onText={onText} onClose={() => setScanning(false)} />
-      </Show>
+      {scanner.view()}
     </div>
   );
 }
 
 function Problem(props: { remote: RemoteController }) {
+  const scanner = useScanner(props.remote);
   return (
     <div class="center">
       <Mark />
       <h1>Connexion impossible</h1>
       <p>{props.remote.error() ?? "Le PC ne répond pas."}</p>
-      <div class="row">
-        <button class="btn" onClick={() => props.remote.start()}>
-          Réessayer
-        </button>
-        <Show when={props.remote.paired}>
-          <button class="btn ghost" onClick={() => props.remote.forget()}>
-            Oublier ce PC
-          </button>
-        </Show>
-      </div>
+      <RescueActions remote={props.remote} onScan={scanner.open} retry />
+      {scanner.view()}
     </div>
   );
 }
@@ -99,6 +79,13 @@ function Remote(props: { remote: RemoteController }) {
       },
     };
   };
+  // Hors ligne depuis plus de 3 s : la surface de pointage laisse la place aux moyens de s'en sortir.
+  const [stuck, setStuck] = createSignal(false);
+  createEffect(() => {
+    if (r.phase() === "ready") return setStuck(false);
+    const t = setTimeout(() => setStuck(true), 3000);
+    onCleanup(() => clearTimeout(t));
+  });
   const left = down("left");
   const right = down("right");
 
@@ -118,7 +105,9 @@ function Remote(props: { remote: RemoteController }) {
       </div>
 
       {/* Toucher la surface ferme le clavier (et celui de l'iPhone), pas le panneau d'actions : on vise puis on appuie. */}
-      <Pad remote={r} onTouch={() => panel() === "keyboard" && setPanel(null)} />
+      <Show when={!stuck()} fallback={<Recovery remote={r} />}>
+        <Pad remote={r} onTouch={() => panel() === "keyboard" && setPanel(null)} />
+      </Show>
 
       <Show when={panel() === "keyboard"}>
         <Keyboard remote={r} />
