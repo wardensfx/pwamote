@@ -42,7 +42,7 @@ export function Pad(props: { remote: RemoteController; onTouch?: () => void }) {
         props.onTouch?.();
         gestures.down(e.pointerId, e.clientX, e.clientY, e.timeStamp);
       }}
-      onPointerMove={(e) => gestures.move(e.pointerId, e.clientX, e.clientY)}
+      onPointerMove={(e) => gestures.move(e.pointerId, e.clientX, e.clientY, e.timeStamp)}
       onPointerUp={(e) => gestures.up(e.pointerId, e.timeStamp)}
       onPointerCancel={() => gestures.cancel()}
       onContextMenu={(e) => e.preventDefault()}

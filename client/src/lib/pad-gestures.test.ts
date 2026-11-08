@@ -138,4 +138,23 @@ describe("PadGestures", () => {
     g.up(1, 400);
     expect(log).toEqual(["clutch true", "clutch false"]);
   });
+
+  it("en mode pouce, une dérive lente du pouce, même longue, ne défile jamais", () => {
+    const { g, log } = setup("air_hold");
+    g.down(1, 100, 100, 0);
+    // 4 px toutes les 100 ms : 120 px au bout de 3 s, mais jamais 40 px en 250 ms.
+    for (let i = 1; i <= 30; i++) g.move(1, 100, 100 + 4 * i, i * 100);
+    g.up(1, 3100);
+    expect(log).toEqual(["clutch true", "clutch false"]);
+  });
+
+  it("en mode pouce, un balayage vertical rapide défile même après une longue visée", () => {
+    const { g, log } = setup("air_hold");
+    g.down(1, 100, 100, 0);
+    g.move(1, 102, 104, 1000);
+    g.move(1, 102, 130, 1050);
+    g.move(1, 102, 160, 1100);
+    g.up(1, 1500);
+    expect(log).toContain("scroll 0 30");
+  });
 });
