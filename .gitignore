@@ -5,3 +5,4 @@ client/dist/
 .DS_Store
 .env
 desktop-ui/dist/
+crates/pwamote-desktop/gen/
