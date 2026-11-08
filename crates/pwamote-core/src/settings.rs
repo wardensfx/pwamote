@@ -51,6 +51,10 @@ pub struct PointerSettings {
     pub trackpad_speed: f32,
     pub scroll_speed: f32,
     pub natural_scroll: bool,
+    /// Le déplacement du téléphone (gauche/droite, haut/bas) s'ajoute au lacet et au tangage.
+    pub translation: bool,
+    /// Pixels de curseur par mètre de déplacement du téléphone.
+    pub translation_gain: f32,
 }
 
 impl Default for PointerSettings {
@@ -66,6 +70,8 @@ impl Default for PointerSettings {
             trackpad_speed: 3.0,
             scroll_speed: 1.0,
             natural_scroll: true,
+            translation: false,
+            translation_gain: 2500.0,
         }
     }
 }

@@ -2,7 +2,7 @@ import { Show, createMemo, onCleanup } from "solid-js";
 import { PadGestures } from "../lib/pad-gestures";
 import type { RemoteController } from "../lib/remote";
 
-export function Pad(props: { remote: RemoteController }) {
+export function Pad(props: { remote: RemoteController; onTouch?: () => void }) {
   const r = props.remote;
   const mode = () => r.settings()?.pointer.mode ?? "air_hold";
   const gestures = new PadGestures(
@@ -26,7 +26,7 @@ export function Pad(props: { remote: RemoteController }) {
       case "air_always":
         return ["Visez avec le téléphone", "Le curseur suit en permanence"];
       case "air_hold":
-        return ["Posez le pouce et visez", "Levez-le pour lâcher le curseur"];
+        return ["Posez le pouce et visez", "Levez-le pour lâcher le curseur · glissez-le pour défiler"];
       default:
         return ["Glissez pour déplacer", "Tapez pour cliquer · deux doigts pour défiler"];
     }
@@ -39,6 +39,7 @@ export function Pad(props: { remote: RemoteController }) {
       onPointerDown={(e) => {
         if ((e.target as HTMLElement).closest("button")) return;
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        props.onTouch?.();
         gestures.down(e.pointerId, e.clientX, e.clientY, e.timeStamp);
       }}
       onPointerMove={(e) => gestures.move(e.pointerId, e.clientX, e.clientY)}

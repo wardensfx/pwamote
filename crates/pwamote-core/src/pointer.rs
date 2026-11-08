@@ -11,7 +11,7 @@
 //! 4. zone morte douce, puis courbe d'accélération ;
 //! 5. accumulation sub-pixel pour ne perdre aucun mouvement lent.
 
-use crate::protocol::MotionSample;
+use crate::protocol::{LinearSample, MotionSample};
 use crate::settings::{PointerMode, PointerSettings};
 
 type V3 = [f32; 3];
@@ -53,6 +53,10 @@ const MAX_DT: f32 = 0.1;
 const ACCEL_REF_DPS: f32 = 90.0;
 /// Multiplicateur d'accélération maximal (avant pondération par le réglage).
 const ACCEL_MAX: f32 = 4.0;
+/// Constante de temps (s) de la vitesse « qui fuit » du mode embardée/pilonnement.
+const VELOCITY_TAU: f32 = 0.3;
+/// Accélération linéaire (m/s²) en dessous de laquelle on ne voit que du bruit de capteur.
+const LINEAR_NOISE: f32 = 0.12;
 /// Unités de molette Windows par pixel CSS de défilement.
 const WHEEL_PER_PX: f32 = 2.0;
 
@@ -151,6 +155,8 @@ pub struct PointerEngine {
     wheel: Accumulator,
     clutch: bool,
     was_active: bool,
+    /// Vitesse (m/s) du téléphone : (droite, haut).
+    velocity: (f32, f32),
 }
 
 impl PointerEngine {
@@ -216,6 +222,7 @@ impl PointerEngine {
             if self.was_active {
                 self.yaw.reset();
                 self.pitch.reset();
+                self.velocity = (0.0, 0.0);
                 self.pixels.clear();
                 self.was_active = false;
             }
@@ -246,6 +253,31 @@ impl PointerEngine {
         // lever le bout du téléphone (tangage positif) l'envoie vers le haut.
         let dx = -yaw * gain * if cfg.invert_x { -1.0 } else { 1.0 };
         let dy = -pitch * gain * if cfg.invert_y { -1.0 } else { 1.0 };
+        let (dx, dy) = self.pixels.push(dx, dy);
+        PixelDelta { dx, dy }
+    }
+
+    /// Déplacement du téléphone : l'embardée (gauche/droite) et le pilonnement (haut/bas) déplacent
+    /// aussi le curseur. L'accélération est intégrée en une vitesse « qui fuit » pour ne pas dériver.
+    pub fn on_linear(&mut self, s: &LinearSample, cfg: &PointerSettings) -> PixelDelta {
+        if !(s.dt.is_finite() && s.dt > 0.0) {
+            return PixelDelta::default();
+        }
+        if !cfg.translation || !self.gyro_active(cfg) {
+            self.velocity = (0.0, 0.0);
+            return PixelDelta::default();
+        }
+        let dt = s.dt.min(MAX_DT);
+        let up = self.up.unwrap_or([0.0, 0.0, 1.0]);
+        let right = Self::right_axis(up);
+        let quiet = |a: f32| if a.abs() < LINEAR_NOISE { 0.0 } else { a };
+        let a_h = quiet(dot(s.accel, right));
+        let a_v = quiet(dot(s.accel, up));
+        let leak = (-dt / VELOCITY_TAU).exp();
+        self.velocity.0 = (self.velocity.0 + a_h * dt) * leak;
+        self.velocity.1 = (self.velocity.1 + a_v * dt) * leak;
+        let dx = self.velocity.0 * dt * cfg.translation_gain;
+        let dy = -self.velocity.1 * dt * cfg.translation_gain;
         let (dx, dy) = self.pixels.push(dx, dy);
         PixelDelta { dx, dy }
     }
@@ -406,6 +438,108 @@ mod tests {
             fast_acc.abs() > 2 * fast_lin.abs(),
             "{fast_acc} vs {fast_lin}"
         );
+    }
+
+    fn translation_cfg() -> PointerSettings {
+        PointerSettings {
+            mode: PointerMode::AirAlways,
+            translation: true,
+            ..cfg()
+        }
+    }
+
+    /// Pousse `ms` millisecondes d'accélération constante et cumule le déplacement.
+    fn shove(accel: V3, ms: u32, cfg: &PointerSettings) -> (i32, i32) {
+        let mut e = PointerEngine::new();
+        e.on_motion(
+            &MotionSample {
+                gyro_dps: [0.0; 3],
+                accel: FLAT,
+                dt: 0.01,
+            },
+            cfg,
+        );
+        let (mut x, mut y) = (0, 0);
+        for _ in 0..(ms / 10) {
+            let d = e.on_linear(&LinearSample { accel, dt: 0.01 }, cfg);
+            x += d.dx;
+            y += d.dy;
+        }
+        (x, y)
+    }
+
+    #[test]
+    fn sway_to_the_right_moves_the_cursor_right() {
+        let (x, y) = shove([2.0, 0.0, 0.0], 150, &translation_cfg());
+        assert!(x > 20, "x = {x}");
+        assert!(y.abs() <= 1, "y = {y}");
+    }
+
+    #[test]
+    fn raising_the_phone_moves_the_cursor_up() {
+        // À plat, « haut » est l'axe z du téléphone.
+        let (x, y) = shove([0.0, 0.0, 2.0], 150, &translation_cfg());
+        assert!(y < -20, "y = {y}");
+        assert!(x.abs() <= 1, "x = {x}");
+    }
+
+    #[test]
+    fn translation_is_off_by_default_and_when_not_aiming() {
+        let off = PointerSettings {
+            translation: false,
+            ..translation_cfg()
+        };
+        assert_eq!(shove([2.0, 0.0, 0.0], 150, &off), (0, 0));
+        let hold = PointerSettings {
+            mode: PointerMode::AirHold,
+            ..translation_cfg()
+        };
+        assert_eq!(shove([2.0, 0.0, 0.0], 150, &hold), (0, 0));
+    }
+
+    #[test]
+    fn sensor_noise_does_not_move_the_cursor() {
+        assert_eq!(shove([0.05, 0.0, -0.05], 1000, &translation_cfg()), (0, 0));
+    }
+
+    #[test]
+    fn a_back_and_forth_gesture_returns_near_the_start() {
+        let cfg = translation_cfg();
+        let mut e = PointerEngine::new();
+        e.on_motion(
+            &MotionSample {
+                gyro_dps: [0.0; 3],
+                accel: FLAT,
+                dt: 0.01,
+            },
+            &cfg,
+        );
+        let mut x = 0;
+        for a in [2.0f32, -2.0] {
+            for _ in 0..15 {
+                x += e
+                    .on_linear(
+                        &LinearSample {
+                            accel: [a, 0.0, 0.0],
+                            dt: 0.01,
+                        },
+                        &cfg,
+                    )
+                    .dx;
+            }
+        }
+        for _ in 0..100 {
+            x += e
+                .on_linear(
+                    &LinearSample {
+                        accel: [0.0; 3],
+                        dt: 0.01,
+                    },
+                    &cfg,
+                )
+                .dx;
+        }
+        assert!(x.abs() < 40, "x = {x}");
     }
 
     #[test]

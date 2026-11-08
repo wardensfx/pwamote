@@ -3,7 +3,7 @@ import type { Settings } from "../generated/Settings";
 import { SettingsSync } from "./settings-sync";
 
 const base = (): Settings => ({
-  pointer: { mode: "air_hold", sensitivity: 38, acceleration: 0.45, smoothing: 0.35, deadzone_dps: 1.6, invert_y: false, invert_x: false, trackpad_speed: 1.6, scroll_speed: 1, natural_scroll: true },
+  pointer: { mode: "air_hold", sensitivity: 38, acceleration: 0.45, smoothing: 0.35, deadzone_dps: 1.6, invert_y: false, invert_x: false, trackpad_speed: 1.6, scroll_speed: 1, natural_scroll: true, translation: false, translation_gain: 2500 },
   magnifier: { zoom: 2.5, follow: "smart", animation_ms: 220, caret_hold_ms: 1500 },
   keyboard: { sticky_modifiers: true },
   feedback: { haptics: true },

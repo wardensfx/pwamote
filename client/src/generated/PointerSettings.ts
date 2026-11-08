@@ -25,4 +25,12 @@ invert_x: boolean,
 /**
  * Multiplicateur du mode trackpad.
  */
-trackpad_speed: number, scroll_speed: number, natural_scroll: boolean, };
+trackpad_speed: number, scroll_speed: number, natural_scroll: boolean, 
+/**
+ * Le déplacement du téléphone (gauche/droite, haut/bas) s'ajoute au lacet et au tangage.
+ */
+translation: boolean, 
+/**
+ * Pixels de curseur par mètre de déplacement du téléphone.
+ */
+translation_gain: number, };

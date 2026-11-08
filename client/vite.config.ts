@@ -7,6 +7,8 @@ export default defineConfig({
     solid(),
     VitePWA({
       registerType: "autoUpdate",
+      // L'enregistrement est fait dans main.tsx, qui vérifie aussi les mises à jour à la reprise.
+      injectRegister: false,
       manifest: {
         name: "PwaMote",
         short_name: "PwaMote",

@@ -200,9 +200,20 @@ pub struct MotionSample {
     pub dt: f32,
 }
 
+/// Accélération linéaire du téléphone (gravité retirée), dans son repère, pour l'option
+/// « embardée / pilonnement ».
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct LinearSample {
+    /// En m/s².
+    pub accel: [f32; 3],
+    /// Intervalle depuis l'échantillon précédent, en secondes.
+    pub dt: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinaryFrame {
     Motion(MotionSample),
+    Linear(LinearSample),
     /// Déplacement du doigt en pixels CSS.
     Trackpad {
         dx: f32,
@@ -230,6 +241,7 @@ pub enum FrameError {
 const KIND_MOTION: u8 = 0x01;
 const KIND_TRACKPAD: u8 = 0x02;
 const KIND_SCROLL: u8 = 0x03;
+const KIND_LINEAR: u8 = 0x04;
 
 impl BinaryFrame {
     pub fn encode(&self) -> Vec<u8> {
@@ -246,6 +258,7 @@ impl BinaryFrame {
                     m.dt,
                 ],
             ),
+            BinaryFrame::Linear(l) => (KIND_LINEAR, vec![l.accel[0], l.accel[1], l.accel[2], l.dt]),
             BinaryFrame::Trackpad { dx, dy } => (KIND_TRACKPAD, vec![*dx, *dy]),
             BinaryFrame::Scroll { dx, dy } => (KIND_SCROLL, vec![*dx, *dy]),
         };
@@ -261,6 +274,7 @@ impl BinaryFrame {
         let (&kind, payload) = bytes.split_first().ok_or(FrameError::Empty)?;
         let expected = match kind {
             KIND_MOTION => 7,
+            KIND_LINEAR => 4,
             KIND_TRACKPAD | KIND_SCROLL => 2,
             other => return Err(FrameError::UnknownKind(other)),
         };
@@ -285,6 +299,10 @@ impl BinaryFrame {
                 accel: [f[3], f[4], f[5]],
                 dt: f[6],
             }),
+            KIND_LINEAR => BinaryFrame::Linear(LinearSample {
+                accel: [f[0], f[1], f[2]],
+                dt: f[3],
+            }),
             KIND_TRACKPAD => BinaryFrame::Trackpad { dx: f[0], dy: f[1] },
             _ => BinaryFrame::Scroll { dx: f[0], dy: f[1] },
         })
@@ -295,6 +313,16 @@ impl BinaryFrame {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn linear_frames_round_trip() {
+        let f = BinaryFrame::Linear(LinearSample {
+            accel: [0.5, -1.0, 2.0],
+            dt: 0.016,
+        });
+        assert_eq!(f.encode().len(), 17);
+        assert_eq!(BinaryFrame::decode(&f.encode()), Ok(f));
+    }
 
     #[test]
     fn client_messages_are_tagged_snake_case_json() {

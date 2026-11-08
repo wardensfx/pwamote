@@ -241,6 +241,12 @@ impl Session {
                     input.move_by(d.dx, d.dy);
                 }
             }
+            BinaryFrame::Linear(sample) => {
+                let d = self.engine.on_linear(&sample, &cfg);
+                if !d.is_zero() {
+                    input.move_by(d.dx, d.dy);
+                }
+            }
             BinaryFrame::Trackpad { dx, dy } => {
                 let d = self.engine.on_trackpad(dx, dy, &cfg);
                 if !d.is_zero() {

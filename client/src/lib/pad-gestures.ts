@@ -9,19 +9,24 @@ export interface PadSink {
 
 const TAP_MAX_MS = 220;
 const TAP_MAX_MOVE = 8;
+/** Distance (px) au-delà de laquelle un doigt posé qui glisse verticalement devient un défilement. */
+const THUMB_SCROLL_START = 14;
 
 /**
  * Interprète les doigts posés sur la surface centrale.
  *
  * - un doigt posé : embrayage du gyroscope (`clutch`) ;
  * - en mode trackpad : un doigt déplace le curseur, un tap clique ;
- * - deux doigts : défilement, dans tous les modes.
+ * - deux doigts : défilement, dans tous les modes ;
+ * - en mode « gyro pouce », glisser le pouce vers le haut ou le bas défile, le curseur restant en place.
  */
 export class PadGestures {
   private pointers = new Map<number, { x: number; y: number }>();
   private startedAt = 0;
   private travelled = 0;
   private sawSecondFinger = false;
+  private origin = { x: 0, y: 0 };
+  private thumbScrolling = false;
 
   constructor(
     private readonly sink: PadSink,
@@ -33,6 +38,8 @@ export class PadGestures {
       this.startedAt = t;
       this.travelled = 0;
       this.sawSecondFinger = false;
+      this.thumbScrolling = false;
+      this.origin = { x, y };
       this.sink.clutch(true);
     } else {
       this.sawSecondFinger = true;
@@ -54,6 +61,13 @@ export class PadGestures {
       this.sink.scroll(dx / this.pointers.size, dy / this.pointers.size);
     } else if (this.mode() === "trackpad") {
       this.sink.trackpad(dx, dy);
+    } else if (this.mode() === "air_hold") {
+      if (!this.thumbScrolling && this.travelled > THUMB_SCROLL_START && Math.abs(y - this.origin.y) > Math.abs(x - this.origin.x)) {
+        this.thumbScrolling = true;
+        // Le curseur reste là où il est pendant que la page défile.
+        this.sink.clutch(false);
+      }
+      if (this.thumbScrolling) this.sink.scroll(0, dy);
     }
   }
 

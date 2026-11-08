@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OrientationSource, angularVelocity, quatFromEuler, quatMul, upInBody, type Quat } from "./orientation";
+import { OrientationSource, angularVelocity, linearAcceleration, quatFromEuler, quatMul, upInBody, type Quat } from "./orientation";
 import type { MotionSample } from "./frames";
 
 const RAD = Math.PI / 180;
@@ -120,5 +120,36 @@ describe("orientation", () => {
   it("angularVelocity est nulle sans rotation", () => {
     const q = quatFromEuler(5, 6, 7);
     expect(angularVelocity(q, q, 0.01)).toEqual([0, 0, 0]);
+  });
+
+  it("linearAcceleration : immobile, rien ne reste après retrait de la gravité (signe W3C ou iOS)", () => {
+    const up = upInBody(30, -20);
+    for (const k of [1, -1]) {
+      const raw = up.map((v) => v * 9.81 * k) as [number, number, number];
+      for (const v of linearAcceleration(raw, up)) expect(v).toBeCloseTo(0, 5);
+    }
+  });
+
+  it("linearAcceleration : une poussée vers la droite ressort sur x, quel que soit le signe du capteur", () => {
+    const up = upInBody(0, 0);
+    for (const k of [1, -1]) {
+      const raw: [number, number, number] = [k * 1.5, 0, k * 9.81];
+      const lin = linearAcceleration(raw, up);
+      expect(lin[0]).toBeCloseTo(1.5 * k * k, 5);
+    }
+  });
+
+  it("envoie l'accélération linéaire seulement quand l'option est active", () => {
+    const got: number[] = [];
+    let t = 0;
+    const src = new OrientationSource(() => {}, { now: () => t, angle: () => 0, onLinear: (a) => got.push(a[0]) });
+    src.handle({ alpha: 0, beta: 0, gamma: 0 });
+    t += 16;
+    src.handle({ alpha: 0, beta: 0, gamma: 0 });
+    src.handleMotion({ x: 1, y: 0, z: 9.81 });
+    t += 16;
+    src.handleMotion({ x: 1, y: 0, z: 9.81 });
+    expect(got.length).toBe(1);
+    expect(got[0]).toBeCloseTo(1, 5);
   });
 });

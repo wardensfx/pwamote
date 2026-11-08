@@ -217,3 +217,8 @@ input[type="range"]::-webkit-slider-thumb {
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* La ligne entière d'une option réagit au toucher ; rien ne doit masquer l'interrupteur. */
+.field.tap { cursor: pointer; padding: 4px 0; touch-action: manipulation; }
+.field.tap .switch { margin: -6px; padding: 6px; width: 64px; height: 44px; }
+.field.tap .switch i { inset: 6px; }

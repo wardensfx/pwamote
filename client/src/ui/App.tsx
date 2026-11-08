@@ -89,11 +89,20 @@ function Remote(props: { remote: RemoteController }) {
         </button>
       </div>
 
-      <Pad remote={r} />
+      <Pad remote={r} onTouch={() => setKeyboard(false)} />
 
       <Show when={keyboard()}>
         <Keyboard remote={r} />
       </Show>
+
+      <div class="clicks">
+        <button class="glass click" data-side="left" data-down={left.on()} {...left.handlers}>
+          Clic gauche
+        </button>
+        <button class="glass click" data-side="right" data-down={right.on()} {...right.handlers}>
+          Clic droit
+        </button>
+      </div>
 
       <div class="chips">
         <button class="glass chip" aria-pressed={r.magnifier().active} onClick={() => r.magnify("toggle")}>
@@ -104,15 +113,6 @@ function Remote(props: { remote: RemoteController }) {
         </button>
         <button class="glass chip" aria-pressed={keyboard()} onClick={() => setKeyboard(!keyboard())}>
           <KeyboardIcon /> Clavier
-        </button>
-      </div>
-
-      <div class="clicks">
-        <button class="glass click" data-side="left" data-down={left.on()} {...left.handlers}>
-          Clic gauche
-        </button>
-        <button class="glass click" data-side="right" data-down={right.on()} {...right.handlers}>
-          Clic droit
         </button>
       </div>
 

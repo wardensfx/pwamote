@@ -14,6 +14,7 @@ export interface MotionSample {
 const KIND_MOTION = 0x01;
 const KIND_TRACKPAD = 0x02;
 const KIND_SCROLL = 0x03;
+const KIND_LINEAR = 0x04;
 
 function pack(kind: number, values: number[]): ArrayBuffer {
   const buf = new ArrayBuffer(1 + values.length * 4);
@@ -26,3 +27,6 @@ function pack(kind: number, values: number[]): ArrayBuffer {
 export const encodeMotion = (s: MotionSample) => pack(KIND_MOTION, [...s.gyro, ...s.accel, s.dt]);
 export const encodeTrackpad = (dx: number, dy: number) => pack(KIND_TRACKPAD, [dx, dy]);
 export const encodeScroll = (dx: number, dy: number) => pack(KIND_SCROLL, [dx, dy]);
+
+/** Accélération linéaire (gravité retirée) en m/s², pour l'option embardée / pilonnement. */
+export const encodeLinear = (accel: Vec3, dt: number) => pack(KIND_LINEAR, [...accel, dt]);

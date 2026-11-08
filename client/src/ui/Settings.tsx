@@ -32,13 +32,14 @@ function Slider(props: { label: string; value: number; min: number; max: number;
 
 function Toggle(props: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <div class="field">
+    // Toute la ligne est cliquable, pas seulement l'interrupteur.
+    <label class="field tap">
       <span class="lbl">{props.label}</span>
       <span class="switch">
         <input type="checkbox" checked={props.checked} onChange={(e) => props.onChange(e.currentTarget.checked)} />
         <i />
       </span>
-    </div>
+    </label>
   );
 }
 
@@ -78,6 +79,11 @@ export function SettingsSheet(props: { remote: RemoteController; onClose: () => 
               <Slider label="Lissage" min={0} max={1} step={0.05} value={cfg().pointer.smoothing} format={(v) => `${Math.round(v * 100)} %`} onChange={(smoothing) => pointer({ smoothing })} />
               <Slider label="Zone morte" min={0} max={6} step={0.1} value={cfg().pointer.deadzone_dps} format={(v) => `${v.toFixed(1)} °/s`} onChange={(deadzone_dps) => pointer({ deadzone_dps })} />
               <Slider label="Vitesse du trackpad" min={0.5} max={12} step={0.1} value={cfg().pointer.trackpad_speed} format={(v) => `×${v.toFixed(1)}`} onChange={(trackpad_speed) => pointer({ trackpad_speed })} />
+              <Toggle label="Déplacements du téléphone" checked={cfg().pointer.translation} onChange={(translation) => pointer({ translation })} />
+              <Show when={cfg().pointer.translation}>
+                <p class="note">Déplacer le téléphone à gauche, à droite, en haut ou en bas déplace aussi le curseur, en plus de l'orientation.</p>
+                <Slider label="Effet des déplacements" min={500} max={8000} step={100} value={cfg().pointer.translation_gain} format={(v) => `${Math.round(v / 100) * 100}`} onChange={(translation_gain) => pointer({ translation_gain })} />
+              </Show>
               <Toggle label="Inverser gauche / droite" checked={cfg().pointer.invert_x} onChange={(invert_x) => pointer({ invert_x })} />
               <Toggle label="Inverser l'axe vertical" checked={cfg().pointer.invert_y} onChange={(invert_y) => pointer({ invert_y })} />
               <Toggle label="Défilement naturel" checked={cfg().pointer.natural_scroll} onChange={(natural_scroll) => pointer({ natural_scroll })} />

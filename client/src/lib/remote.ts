@@ -7,7 +7,7 @@ import type { MouseButton } from "../generated/MouseButton";
 import type { ServerMessage } from "../generated/ServerMessage";
 import type { Settings } from "../generated/Settings";
 import { Connection, PROTOCOL_VERSION, type ConnectionStatus } from "./connection";
-import { encodeMotion, encodeScroll, encodeTrackpad } from "./frames";
+import { encodeLinear, encodeMotion, encodeScroll, encodeTrackpad } from "./frames";
 import { haptic } from "./haptics";
 import { clearIdentity, guessDeviceName, loadIdentity, saveIdentity, wsUrl, type Identity } from "./identity";
 import { StickyModifiers } from "./modifiers";
@@ -40,6 +40,7 @@ export class RemoteController {
   private sync = new SettingsSync((s) => {
     this.settingsSig[1](s);
     this.modifiers.setSticky(s.keyboard.sticky_modifiers);
+    this.orientation?.setLinear(s.pointer.translation && this.orientation.received > 0);
   });
 
   readonly phase = () => this.phaseSig[0]();
@@ -220,7 +221,9 @@ export class RemoteController {
     if (permission === "granted") {
       const send = (s: Parameters<typeof encodeMotion>[0]) => this.conn?.sendBinary(encodeMotion(s));
       // Méthode privilégiée : angles d'orientation, aux axes définis sans ambiguïté.
-      this.orientation ??= new OrientationSource(send);
+      this.orientation ??= new OrientationSource(send, {
+        onLinear: (accel, dt) => this.conn?.sendBinary(encodeLinear(accel, dt)),
+      });
       this.motion ??= new MotionSource(send);
       this.orientation.start();
       // Navigateur sans `deviceorientation` : repli sur le gyroscope brut avec calibration des axes.
@@ -230,6 +233,8 @@ export class RemoteController {
         if (this.orientation && this.orientation.received === 0) {
           this.orientation.stop();
           this.motion?.start();
+        } else {
+          this.orientation?.setLinear(this.settings()?.pointer.translation ?? false);
         }
       }, 1500);
     }

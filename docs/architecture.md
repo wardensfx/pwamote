@@ -245,7 +245,7 @@ Les réglages sont validés et ramenés dans des plages sûres côté serveur (`
 | Direction | Canal | Contenu |
 |---|---|---|
 | téléphone → PC | JSON | `hello`, `pair`, `button`, `key_tap`, `key`, `modifier`, `text`, `clutch`, `recenter`, `magnifier`, `update_settings`, `ping` |
-| téléphone → PC | binaire | `0x01` mouvement (7 × f32), `0x02` trackpad (2 × f32), `0x03` défilement (2 × f32), little-endian |
+| téléphone → PC | binaire | `0x01` mouvement (7 × f32), `0x02` trackpad (2 × f32), `0x03` défilement (2 × f32), `0x04` accélération linéaire pour l'option « déplacements du téléphone » (4 × f32), little-endian |
 | PC → téléphone | JSON | `paired`, `welcome`, `settings`, `magnifier_state`, `error`, `pong` |
 
 Garanties de sécurité côté serveur :

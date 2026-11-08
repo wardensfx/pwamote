@@ -20,8 +20,35 @@ describe("PadGestures", () => {
   it("un doigt posé embraye le gyroscope, levé il le débraye", () => {
     const { g, log } = setup("air_hold");
     g.down(1, 10, 10, 0);
-    g.move(1, 30, 30);
+    g.move(1, 30, 12);
     g.up(1, 500);
+    expect(log).toEqual(["clutch true", "clutch false"]);
+  });
+
+  it("en mode pouce, glisser verticalement défile et lâche le curseur", () => {
+    const { g, log } = setup("air_hold");
+    g.down(1, 100, 100, 0);
+    g.move(1, 100, 110);
+    g.move(1, 101, 130);
+    g.move(1, 101, 150);
+    g.up(1, 900);
+    expect(log).toEqual(["clutch true", "clutch false", "scroll 0 20", "scroll 0 20", "clutch false"]);
+  });
+
+  it("en mode pouce, un petit tremblement ou un glissement horizontal ne défile pas", () => {
+    const { g, log } = setup("air_hold");
+    g.down(1, 100, 100, 0);
+    g.move(1, 104, 103);
+    g.move(1, 140, 106);
+    g.up(1, 900);
+    expect(log).toEqual(["clutch true", "clutch false"]);
+  });
+
+  it("en mode gyro continu, le doigt ne défile pas", () => {
+    const { g, log } = setup("air_always");
+    g.down(1, 0, 0, 0);
+    g.move(1, 0, 80);
+    g.up(1, 900);
     expect(log).toEqual(["clutch true", "clutch false"]);
   });
 

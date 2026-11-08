@@ -57,6 +57,16 @@ export function upInBody(beta: number, gamma: number): Vec3 {
   return [-z * Math.sin(g), y, z * Math.cos(g)];
 }
 
+/**
+ * Accélération linéaire du téléphone : mesure brute moins la gravité attendue d'après l'orientation.
+ * Le signe de la mesure brute varie selon les navigateurs (iOS l'inverse) ; il se déduit de la
+ * gravité, qui domine toujours la mesure quand on ne secoue pas violemment le téléphone.
+ */
+export function linearAcceleration(raw: Vec3, up: Vec3): Vec3 {
+  const k = raw[0] * up[0] + raw[1] * up[1] + raw[2] * up[2] >= 0 ? 1 : -1;
+  return [k * raw[0] - G * up[0], k * raw[1] - G * up[1], k * raw[2] - G * up[2]];
+}
+
 export interface RawOrientation {
   alpha: number | null;
   beta: number | null;
@@ -66,6 +76,8 @@ export interface RawOrientation {
 export interface OrientationDeps {
   now?: () => number;
   angle?: () => number;
+  /** Reçoit l'accélération linéaire quand elle est activée avec `setLinear(true)`. */
+  onLinear?: (accel: Vec3, dt: number) => void;
 }
 
 /**
@@ -79,6 +91,10 @@ export class OrientationSource {
   private listener: ((e: DeviceOrientationEvent) => void) | null = null;
   private readonly now: () => number;
   private readonly angle: () => number;
+  private readonly onLinear?: (accel: Vec3, dt: number) => void;
+  private up: Vec3 | null = null;
+  private lastLinear: number | null = null;
+  private linearListener: ((e: DeviceMotionEvent) => void) | null = null;
   /** Nombre d'événements reçus : permet de détecter un capteur muet. */
   received = 0;
 
@@ -88,6 +104,29 @@ export class OrientationSource {
   ) {
     this.now = deps.now ?? (() => performance.now());
     this.angle = deps.angle ?? (() => screen.orientation?.angle ?? 0);
+    this.onLinear = deps.onLinear;
+  }
+
+  /** Active ou coupe l'envoi de l'accélération linéaire (option embardée / pilonnement). */
+  setLinear(enabled: boolean): void {
+    if (enabled && !this.linearListener && this.onLinear) {
+      this.lastLinear = null;
+      this.linearListener = (e) => this.handleMotion(e.accelerationIncludingGravity);
+      window.addEventListener("devicemotion", this.linearListener);
+    } else if (!enabled && this.linearListener) {
+      window.removeEventListener("devicemotion", this.linearListener);
+      this.linearListener = null;
+    }
+  }
+
+  handleMotion(a: { x: number | null; y: number | null; z: number | null } | null): void {
+    if (!a || a.x === null || a.y === null || a.z === null || !this.up) return;
+    const t = this.now();
+    const prev = this.lastLinear;
+    this.lastLinear = t;
+    if (prev === null || t <= prev) return;
+    const lin = linearAcceleration([a.x, a.y, a.z], this.up);
+    this.onLinear?.(rotateForOrientation(lin, this.angle()), (t - prev) / 1000);
   }
 
   handle(ev: RawOrientation): void {
@@ -102,6 +141,7 @@ export class OrientationSource {
     if (!prev || dt <= 0) return;
     const gyro = angularVelocity(prev, q, dt);
     const up = upInBody(ev.beta, ev.gamma);
+    this.up = up;
     const accel: Vec3 = [up[0] * G, up[1] * G, up[2] * G];
     const a = this.angle();
     this.onSample({ gyro: rotateForOrientation(gyro, a), accel: rotateForOrientation(accel, a), dt });
@@ -118,5 +158,6 @@ export class OrientationSource {
     if (this.listener) window.removeEventListener("deviceorientation", this.listener);
     this.listener = null;
     this.prev = null;
+    this.setLinear(false);
   }
 }
