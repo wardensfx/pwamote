@@ -10,12 +10,14 @@ use pwamote_core::settings::{Conflict, Settings, SettingsStore, VersionedSetting
 use rand::Rng as _;
 use tokio::sync::broadcast;
 
+use crate::config::AppConfig;
 use crate::input::{InputSink, MagnifierSink};
 
 /// Persistance des réglages et des appareils.
 pub trait Persist: Send + Sync {
     fn save_settings(&self, settings: &VersionedSettings);
     fn save_devices(&self, registry: &PairingRegistry);
+    fn save_config(&self, config: &AppConfig);
 }
 
 /// Fichiers JSON dans le dossier de données de l'utilisateur
@@ -26,6 +28,7 @@ pub struct JsonFiles {
 
 const SETTINGS_FILE: &str = "settings.json";
 const DEVICES_FILE: &str = "devices.json";
+const CONFIG_FILE: &str = "config.json";
 
 impl JsonFiles {
     pub fn new(dir: impl Into<PathBuf>) -> std::io::Result<Self> {
@@ -68,6 +71,12 @@ impl JsonFiles {
         })
     }
 
+    pub fn load_config(&self) -> AppConfig {
+        self.read::<AppConfig>(CONFIG_FILE)
+            .unwrap_or_default()
+            .sanitized()
+    }
+
     pub fn load_devices(&self) -> PairingRegistry {
         self.read(DEVICES_FILE).unwrap_or_default()
     }
@@ -80,6 +89,9 @@ impl Persist for JsonFiles {
     fn save_devices(&self, registry: &PairingRegistry) {
         self.write(DEVICES_FILE, registry);
     }
+    fn save_config(&self, config: &AppConfig) {
+        self.write(CONFIG_FILE, config);
+    }
 }
 
 /// Persistance en mémoire, pour les tests.
@@ -87,6 +99,7 @@ impl Persist for JsonFiles {
 pub struct MemoryPersist {
     pub settings: Mutex<Option<VersionedSettings>>,
     pub devices: Mutex<Option<PairingRegistry>>,
+    pub config: Mutex<Option<AppConfig>>,
 }
 
 impl Persist for MemoryPersist {
@@ -95,6 +108,9 @@ impl Persist for MemoryPersist {
     }
     fn save_devices(&self, registry: &PairingRegistry) {
         *self.devices.lock().unwrap() = Some(registry.clone());
+    }
+    fn save_config(&self, config: &AppConfig) {
+        *self.config.lock().unwrap() = Some(config.clone());
     }
 }
 
@@ -123,6 +139,8 @@ pub struct AppState {
     pub input: Arc<dyn InputSink>,
     pub magnifier: Arc<dyn MagnifierSink>,
     settings_tx: broadcast::Sender<VersionedSettings>,
+    revoked_tx: broadcast::Sender<String>,
+    connected: std::sync::atomic::AtomicUsize,
     pub server_name: String,
 }
 
@@ -136,6 +154,7 @@ impl AppState {
         server_name: String,
     ) -> Arc<Self> {
         let (settings_tx, _) = broadcast::channel(16);
+        let (revoked_tx, _) = broadcast::channel(16);
         magnifier.configure(&settings.settings.magnifier);
         Arc::new(Self {
             shared: Mutex::new(Shared {
@@ -146,6 +165,8 @@ impl AppState {
             input,
             magnifier,
             settings_tx,
+            revoked_tx,
+            connected: std::sync::atomic::AtomicUsize::new(0),
             server_name,
         })
     }
@@ -156,6 +177,26 @@ impl AppState {
 
     pub fn settings(&self) -> VersionedSettings {
         self.lock().settings.current().clone()
+    }
+
+    /// Nombre de téléphones actuellement connectés et authentifiés.
+    pub fn connected_count(&self) -> usize {
+        self.connected.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn connection_opened(&self) {
+        self.connected
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn connection_closed(&self) {
+        self.connected
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Reçoit l'identifiant de chaque appareil révoqué, pour couper sa session en cours.
+    pub fn subscribe_revocations(&self) -> broadcast::Receiver<String> {
+        self.revoked_tx.subscribe()
     }
 
     pub fn subscribe_settings(&self) -> broadcast::Receiver<VersionedSettings> {
@@ -224,6 +265,7 @@ impl AppState {
         };
         if removed {
             self.persist.save_devices(&registry);
+            let _ = self.revoked_tx.send(device_id.to_string());
         }
         removed
     }

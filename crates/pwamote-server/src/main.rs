@@ -1,82 +1,24 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
+//! Mode ligne de commande : même serveur que l'application de bureau, sans fenêtre.
 
-use pwamote_server::input::{InputSink, LogMagnifier, MagnifierSink};
-use pwamote_server::state::{AppState, JsonFiles};
-use pwamote_server::tls::Pki;
-use pwamote_server::web::{router, WebState};
-use pwamote_server::{mdns, net};
-
-const PORT: u16 = 8443;
-
-fn data_dir() -> std::path::PathBuf {
-    directories::ProjectDirs::from("app", "PwaMote", "PwaMote")
-        .map(|d| d.data_dir().to_path_buf())
-        .unwrap_or_else(|| std::path::PathBuf::from(".pwamote"))
-}
+use pwamote_server::bootstrap;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
-    let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let files = JsonFiles::new(data_dir())?;
-    let pki = Arc::new(Pki::load_or_create(files.dir())?);
-    let settings = files.load_settings();
-    let registry = files.load_devices();
+    let opened = bootstrap::open(bootstrap::data_dir())?;
+    let supervisor = opened.supervisor;
+    supervisor.start().await?;
+    let status = supervisor.status().await;
+    let port = status.port.unwrap_or_default();
+    println!("\nPwaMote prêt sur {}", status.origin.unwrap_or_default());
+    println!("  Page d'appairage (QR code) : https://localhost:{port}/admin/pair\n");
 
-    #[cfg(windows)]
-    let input: Arc<dyn InputSink> = Arc::new(pwamote_server::platform::windows::WindowsInput);
-    #[cfg(not(windows))]
-    let input: Arc<dyn InputSink> = Arc::new(pwamote_server::input::LogInput);
-    let magnifier: Arc<dyn MagnifierSink> =
-        Arc::new(LogMagnifier::new(&settings.settings.magnifier));
-
-    let machine = net::machine_name();
-    let host = net::mdns_host(&machine);
-    let ips = net::local_ipv4s();
-    let app = AppState::new(
-        settings,
-        registry,
-        Arc::new(files),
-        input,
-        magnifier,
-        machine.clone(),
-    );
-
-    let mut hosts = vec![host.clone(), "localhost".to_string()];
-    hosts.dedup();
-    let ip_addrs: Vec<std::net::IpAddr> = ips
-        .iter()
-        .map(|ip| (*ip).into())
-        .chain([[127, 0, 0, 1].into()])
-        .collect();
-    let leaf = pki.issue_leaf(&hosts, &ip_addrs)?;
-    let tls = axum_server::tls_rustls::RustlsConfig::from_pem(
-        leaf.chain_pem.into_bytes(),
-        leaf.key_pem.into_bytes(),
-    )
-    .await?;
-
-    let _announcer = mdns::announce(&host, &ips, PORT, &machine)
-        .map_err(|e| tracing::warn!(error = %e, "annonce mDNS impossible"))
-        .ok();
-
-    let code = app.new_pairing_code();
-    let origin = format!("https://{host}:{PORT}");
-    let url = pwamote_server::web::pairing_url(&origin, &code);
-    println!("\nPwaMote prêt.\n  QR code (à scanner avec l'iPhone) : https://localhost:{PORT}/admin/pair\n  ou lien direct : {url}\n");
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], PORT));
-    axum_server::bind_rustls(addr, tls)
-        .serve(
-            router(WebState { app, pki, origin })
-                .into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .await?;
+    tokio::signal::ctrl_c().await?;
+    supervisor.stop().await;
     Ok(())
 }

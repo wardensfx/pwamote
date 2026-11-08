@@ -1,8 +1,11 @@
+pub mod bootstrap;
+pub mod config;
 pub mod input;
 pub mod mdns;
 pub mod net;
 pub mod platform;
 pub mod session;
 pub mod state;
+pub mod supervisor;
 pub mod tls;
 pub mod web;

@@ -70,6 +70,7 @@ impl Session {
 
     fn welcome(&mut self, device_id: String) -> ServerMessage {
         self.device_id = Some(device_id.clone());
+        self.state.connection_opened();
         ServerMessage::Welcome {
             device_id,
             server_name: self.state.server_name.clone(),
@@ -284,6 +285,9 @@ fn dedup(modifiers: &[Modifier]) -> Vec<Modifier> {
 
 impl Drop for Session {
     fn drop(&mut self) {
+        if self.device_id.is_some() {
+            self.state.connection_closed();
+        }
         self.release_all();
     }
 }

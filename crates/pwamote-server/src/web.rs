@@ -29,8 +29,9 @@ struct Assets;
 pub struct WebState {
     pub app: Arc<AppState>,
     pub pki: Arc<Pki>,
-    /// Adresse publique, telle que le téléphone doit l'ouvrir : `https://pwamote-pc.local:8443`.
-    pub origin: String,
+    /// Adresse publique, telle que le téléphone doit l'ouvrir : `https://192.168.1.20:8443`.
+    /// Renseignée une fois le port réel connu.
+    pub origin: Arc<std::sync::OnceLock<String>>,
 }
 
 pub fn router(state: WebState) -> Router {
@@ -113,6 +114,7 @@ async fn send(
 pub async fn serve_socket(socket: WebSocket, app: Arc<AppState>) {
     let (mut tx, mut rx) = socket.split();
     let mut settings_rx = app.subscribe_settings();
+    let mut revoked_rx = app.subscribe_revocations();
     let mut session = Session::new(app);
 
     loop {
@@ -135,6 +137,19 @@ pub async fn serve_socket(socket: WebSocket, app: Arc<AppState>) {
                     Message::Binary(bytes) => session.on_binary(&bytes),
                     Message::Close(_) => break,
                     Message::Ping(_) | Message::Pong(_) => {}
+                }
+            }
+            revoked = revoked_rx.recv() => {
+                // Appareil oublié depuis la fenêtre du PC : on coupe sa session tout de suite.
+                if let Ok(id) = revoked {
+                    if session.device_id() == Some(id.as_str()) {
+                        let _ = send(&mut tx, &ServerMessage::Error {
+                            code: pwamote_core::protocol::ErrorCode::Unauthorized,
+                            message: "cet appareil a été retiré depuis le PC".into(),
+                        }).await;
+                        let _ = tx.send(Message::Close(None)).await;
+                        break;
+                    }
                 }
             }
             changed = settings_rx.recv() => {
@@ -180,7 +195,10 @@ async fn pair_page(
     if !peer.ip().is_loopback() {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let url = pairing_url(&s.origin, &s.app.new_pairing_code());
+    let Some(origin) = s.origin.get() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    let url = pairing_url(origin, &s.app.new_pairing_code());
     let html = format!(
         r#"<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Associer un téléphone · PwaMote</title>

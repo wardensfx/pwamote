@@ -1091,10 +1091,12 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "tokio-rustls",
  "tokio-tungstenite 0.30.0",
  "tower",
  "tracing",
  "tracing-subscriber",
+ "ts-rs",
  "windows",
 ]
 
