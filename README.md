@@ -1,0 +1,65 @@
+# PwaMote
+
+Le téléphone comme télécommande du PC, façon Wiimote.
+
+- **Visée au gyroscope** : on pointe avec le téléphone, le curseur suit. Insensible à la manière de tenir l'appareil.
+- **Trackpad** et **défilement à deux doigts** en complément, au choix dans les réglages.
+- **Clic gauche / clic droit** sur deux grandes zones, avec retour haptique.
+- **Clavier déplié** avec Ctrl, Maj, Alt, Win, Échap, flèches… Les modificateurs sont « collants ».
+- **Loupe intelligente** autour du curseur ou de la zone de saisie.
+- **Appairage en un scan** (QR code), reconnexion automatique, réglages mémorisés et synchronisés entre PC et téléphones.
+
+Cible actuelle : serveur **Windows 11**, client **iPhone** (Safari, installable sur l'écran d'accueil). Voir [docs/architecture.md](docs/architecture.md).
+
+## Démarrer
+
+Prérequis : Rust stable, Node 22.
+
+```powershell
+cd client
+npm ci
+npm run build          # produit client/dist, embarqué dans le serveur
+cd ..
+cargo run --release -p pwamote-server
+```
+
+Au lancement, le serveur affiche l'adresse à ouvrir. Sur le PC, ouvrez `https://localhost:8443/admin/pair` et scannez le QR code avec l'appareil photo de l'iPhone.
+
+### Première fois sur iPhone : faire confiance au PC
+
+Le gyroscope n'est disponible qu'en HTTPS. Le serveur crée sa propre autorité de certification ; il faut l'installer une fois (environ 30 secondes) :
+
+1. Sur la page d'appairage, ouvrez **Profil de confiance iOS** depuis le téléphone, autorisez le téléchargement.
+2. **Réglages › Profil téléchargé › Installer**.
+3. **Réglages › Général › Informations › Réglages des certificats** : activez la confiance pour *PwaMote Local CA*.
+4. Scannez le QR code, puis touchez **Activer le gyroscope**. Sur iOS, l'autorisation se demande depuis un geste.
+
+Ajoutez ensuite la page à l'écran d'accueil (Partager › Sur l'écran d'accueil) pour l'avoir en plein écran.
+
+## Développer
+
+```bash
+cargo test --workspace            # cœur, serveur, bout en bout WebSocket (génère aussi client/src/generated)
+cd client && npm test             # Vitest
+cd client && npm run dev          # client seul, avec proxy vers le serveur local
+```
+
+Le serveur compile sur Linux/macOS avec des adaptateurs qui se contentent de journaliser : on peut y développer l'interface sans Windows.
+
+Développement guidé par les tests : toute logique vit dans `pwamote-core` (sans OS) ou dans `client/src/lib` (sans DOM), testée avant l'adaptateur qui l'utilise.
+
+## Workflow
+
+Trunk-based development : branches courtes, intégration fréquente dans `main`, CI verte obligatoire (`fmt`, `clippy -D warnings`, tests Rust sur Windows, tests et build du client, types TypeScript à jour).
+
+## État
+
+| | |
+|---|---|
+| Protocole, réglages, appairage, pointeur gyroscopique, loupe (logique) | fait, testé |
+| Serveur HTTPS, WebSocket, mDNS, injection `SendInput` | fait, testé de bout en bout (SendInput compilé, à valider sur Windows) |
+| PWA : appairage, gyro, trackpad, clics, clavier, réglages | fait, vérifié dans un navigateur émulant un iPhone |
+| Loupe Windows (API Magnification) | écrite, à valider sur Windows |
+| Caret via UI Automation (navigateurs, Electron) | à faire |
+| Boutons de volume du téléphone | impossible en PWA, voir l'architecture |
+| Fenêtre et icône dans la zone de notification (Tauri) | à faire |
