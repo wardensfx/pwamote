@@ -160,14 +160,23 @@ export type MotionPermission = "granted" | "denied" | "unsupported";
 
 /** Sur iOS, l'autorisation doit être demandée depuis un geste de l'utilisateur. */
 export async function requestMotionPermission(): Promise<MotionPermission> {
-  const DME = (globalThis as { DeviceMotionEvent?: { requestPermission?: () => Promise<string> } }).DeviceMotionEvent;
+  const g = globalThis as {
+    DeviceMotionEvent?: { requestPermission?: () => Promise<string> };
+    DeviceOrientationEvent?: { requestPermission?: () => Promise<string> };
+  };
+  const DME = g.DeviceMotionEvent;
   if (!DME) return "unsupported";
-  if (typeof DME.requestPermission === "function") {
-    try {
-      return (await DME.requestPermission()) === "granted" ? "granted" : "denied";
-    } catch {
-      return "denied";
+  try {
+    // Les deux demandes partent dans le même geste ; l'orientation est facultative.
+    const orientation = g.DeviceOrientationEvent?.requestPermission?.().catch(() => "denied");
+    if (typeof DME.requestPermission === "function") {
+      const motion = await DME.requestPermission();
+      await orientation;
+      return motion === "granted" ? "granted" : "denied";
     }
+    await orientation;
+    return "granted";
+  } catch {
+    return "denied";
   }
-  return "granted";
 }

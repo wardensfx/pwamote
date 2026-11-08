@@ -12,6 +12,7 @@ import { haptic } from "./haptics";
 import { clearIdentity, guessDeviceName, loadIdentity, saveIdentity, wsUrl, type Identity } from "./identity";
 import { StickyModifiers } from "./modifiers";
 import { MotionSource, requestMotionPermission, saveAxisMap, type MotionPermission } from "./motion";
+import { OrientationSource } from "./orientation";
 import { SettingsSync, type Edit } from "./settings-sync";
 
 export type Phase = "needs-pairing" | "connecting" | "ready" | "offline" | "rejected";
@@ -22,6 +23,8 @@ export class RemoteController {
   private pairingCode: string | null = null;
   private conn: Connection | null = null;
   private motion: MotionSource | null = null;
+  private orientation: OrientationSource | null = null;
+  private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   readonly modifiers = new StickyModifiers(true);
 
@@ -215,10 +218,20 @@ export class RemoteController {
     const permission = await requestMotionPermission();
     this.motionSig[1](permission);
     if (permission === "granted") {
-      this.motion ??= new MotionSource((s) => {
-        this.conn?.sendBinary(encodeMotion(s));
-      });
-      this.motion.start();
+      const send = (s: Parameters<typeof encodeMotion>[0]) => this.conn?.sendBinary(encodeMotion(s));
+      // Méthode privilégiée : angles d'orientation, aux axes définis sans ambiguïté.
+      this.orientation ??= new OrientationSource(send);
+      this.motion ??= new MotionSource(send);
+      this.orientation.start();
+      // Navigateur sans `deviceorientation` : repli sur le gyroscope brut avec calibration des axes.
+      if (this.fallbackTimer) clearTimeout(this.fallbackTimer);
+      this.fallbackTimer = setTimeout(() => {
+        this.fallbackTimer = null;
+        if (this.orientation && this.orientation.received === 0) {
+          this.orientation.stop();
+          this.motion?.start();
+        }
+      }, 1500);
     }
     return permission;
   }
@@ -230,7 +243,11 @@ export class RemoteController {
   }
 
   private stopMotion(): void {
+    if (this.fallbackTimer) clearTimeout(this.fallbackTimer);
+    this.fallbackTimer = null;
+    this.orientation?.stop();
     this.motion?.stop();
+    if (this.orientation) this.orientation.received = 0;
     if (this.motionSig[0]() === "granted") this.motionSig[1]("off");
     this.clutchSig[1](false);
   }

@@ -184,6 +184,21 @@ flowchart LR
   Q --> M["SendInput MOUSEEVENTF_MOVE"]
 ```
 
+### Côté téléphone : d'où viennent ω et la gravité
+
+Les navigateurs ne s'accordent pas sur l'ordre des axes de `rotationRate`. Le client calcule donc ω à partir de `deviceorientation` (alpha, beta, gamma, définis sans ambiguïté par le W3C) : l'orientation devient un quaternion, et la rotation entre deux événements, exprimée dans le repère du téléphone, donne la vitesse angulaire. La gravité vient du même calcul, ce qui garantit qu'elle reste cohérente avec ω. `rotationRate` (avec calibration des axes) ne sert que de repli si aucun événement d'orientation n'arrive.
+
+```mermaid
+flowchart LR
+  O["deviceorientation<br/>alpha · beta · gamma"] --> Q["Quaternion q"]
+  Q --> D["Δq = q₀⁻¹ · q₁"]
+  D --> W["ω dans le repère du téléphone"]
+  Q --> U["Haut dans le repère du téléphone<br/>Ry(−γ)·Rx(−β)·ez"]
+  W --> T["Trame de mouvement"]
+  U --> T
+  R["devicemotion + calibration des axes"] -. "repli après 1,5 s sans orientation" .-> T
+```
+
 ### Embrayage
 
 ```mermaid
