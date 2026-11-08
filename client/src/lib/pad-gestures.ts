@@ -10,13 +10,18 @@ export interface PadSink {
 const TAP_MAX_MS = 220;
 const TAP_MAX_MOVE = 8;
 /** Distance (px) au-delà de laquelle un doigt posé qui glisse verticalement devient un défilement. */
-const THUMB_SCROLL_START = 14;
+const THUMB_SCROLL_START = 40;
+/** Le glissement doit être nettement plus vertical qu'horizontal pour défiler. */
+const THUMB_SCROLL_RATIO = 2;
+/** Un tap en mode gyro est plus court qu'en trackpad : un pouce posé pour viser ne doit pas cliquer. */
+const AIR_TAP_MAX_MS = 170;
 
 /**
  * Interprète les doigts posés sur la surface centrale.
  *
  * - un doigt posé : embrayage du gyroscope (`clutch`) ;
- * - en mode trackpad : un doigt déplace le curseur, un tap clique ;
+ * - un tap bref clique, et deux taps rapprochés font un double clic (modes trackpad et gyro pouce) ;
+ * - en mode trackpad : un doigt déplace le curseur ;
  * - deux doigts : défilement, dans tous les modes ;
  * - en mode « gyro pouce », glisser le pouce vers le haut ou le bas défile, le curseur restant en place.
  */
@@ -62,7 +67,7 @@ export class PadGestures {
     } else if (this.mode() === "trackpad") {
       this.sink.trackpad(dx, dy);
     } else if (this.mode() === "air_hold") {
-      if (!this.thumbScrolling && this.travelled > THUMB_SCROLL_START && Math.abs(y - this.origin.y) > Math.abs(x - this.origin.x)) {
+      if (!this.thumbScrolling && this.travelled > THUMB_SCROLL_START && Math.abs(y - this.origin.y) > THUMB_SCROLL_RATIO * Math.abs(x - this.origin.x)) {
         this.thumbScrolling = true;
         // Le curseur reste là où il est pendant que la page défile.
         this.sink.clutch(false);
@@ -74,8 +79,10 @@ export class PadGestures {
   up(id: number, t: number): void {
     if (!this.pointers.delete(id)) return;
     if (this.pointers.size > 0) return;
-    const isTap = t - this.startedAt <= TAP_MAX_MS && this.travelled <= TAP_MAX_MOVE && !this.sawSecondFinger;
-    if (isTap && this.mode() === "trackpad") this.sink.click();
+    const maxMs = this.mode() === "trackpad" ? TAP_MAX_MS : AIR_TAP_MAX_MS;
+    const isTap = t - this.startedAt <= maxMs && this.travelled <= TAP_MAX_MOVE && !this.sawSecondFinger;
+    // Deux taps rapprochés donnent deux clics : Windows en fait un double clic.
+    if (isTap && this.mode() !== "air_always") this.sink.click();
     this.sink.clutch(false);
   }
 

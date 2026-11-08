@@ -28,18 +28,19 @@ describe("PadGestures", () => {
   it("en mode pouce, glisser verticalement défile et lâche le curseur", () => {
     const { g, log } = setup("air_hold");
     g.down(1, 100, 100, 0);
-    g.move(1, 100, 110);
-    g.move(1, 101, 130);
+    g.move(1, 100, 120);
     g.move(1, 101, 150);
+    g.move(1, 101, 170);
     g.up(1, 900);
-    expect(log).toEqual(["clutch true", "clutch false", "scroll 0 20", "scroll 0 20", "clutch false"]);
+    expect(log).toEqual(["clutch true", "clutch false", "scroll 0 30", "scroll 0 20", "clutch false"]);
   });
 
   it("en mode pouce, un petit tremblement ou un glissement horizontal ne défile pas", () => {
     const { g, log } = setup("air_hold");
     g.down(1, 100, 100, 0);
     g.move(1, 104, 103);
-    g.move(1, 140, 106);
+    g.move(1, 118, 128);
+    g.move(1, 140, 135);
     g.up(1, 900);
     expect(log).toEqual(["clutch true", "clutch false"]);
   });
@@ -79,7 +80,7 @@ describe("PadGestures", () => {
     expect(moved.log).not.toContain("click");
   });
 
-  it("jamais de clic par tap en mode gyroscope", () => {
+  it("pas de clic par tap en mode gyro continu", () => {
     const { g, log } = setup("air_always");
     g.down(1, 0, 0, 0);
     g.up(1, 50);
@@ -110,6 +111,31 @@ describe("PadGestures", () => {
     const { g, log } = setup("air_hold");
     g.down(1, 0, 0, 0);
     g.cancel();
+    expect(log).toEqual(["clutch true", "clutch false"]);
+  });
+
+  it("en mode pouce, un petit mouvement du pouce pendant qu'on vise ne coupe pas le curseur", () => {
+    const { g, log } = setup("air_hold");
+    g.down(1, 100, 100, 0);
+    g.move(1, 100, 118);
+    g.move(1, 102, 128);
+    g.up(1, 900);
+    expect(log).toEqual(["clutch true", "clutch false"]);
+  });
+
+  it("en mode pouce, un tap clique et deux taps cliquent deux fois", () => {
+    const { g, log } = setup("air_hold");
+    g.down(1, 50, 50, 0);
+    g.up(1, 90);
+    g.down(1, 50, 50, 200);
+    g.up(1, 250);
+    expect(log).toEqual(["clutch true", "click", "clutch false", "clutch true", "click", "clutch false"]);
+  });
+
+  it("en mode pouce, un appui long pour viser ne clique pas", () => {
+    const { g, log } = setup("air_hold");
+    g.down(1, 50, 50, 0);
+    g.up(1, 400);
     expect(log).toEqual(["clutch true", "clutch false"]);
   });
 });
