@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { countdown, isValidHost, phonesLabel, relativeTime, selectedAddress } from "./format";
 import type { AppConfig, Backend, DeviceView, PairingInfo, ServerStatus } from "./ipc";
 
@@ -42,6 +42,15 @@ export function App(props: { backend: Backend }) {
   const [customMode, setCustomMode] = createSignal(false);
   const [portDraft, setPortDraft] = createSignal<string | null>(null);
 
+  // Ne remplace l'état que s'il a vraiment changé : sinon la liste d'adresses et le QR se redessinent
+  // à chaque interrogation périodique.
+  const updateStatus = (next: ServerStatus) => {
+    if (JSON.stringify(next) !== JSON.stringify(status())) setStatus(next);
+  };
+  const updateDevices = (next: DeviceView[]) => {
+    if (JSON.stringify(next) !== JSON.stringify(devices())) setDevices(next);
+  };
+
   const refreshPairing = async () => {
     try {
       setPairing(await be.newPairing());
@@ -53,7 +62,7 @@ export function App(props: { backend: Backend }) {
 
   const apply = async (patch: Partial<AppConfig>) => {
     const s = status();
-    if (s) setStatus(await be.setConfig({ ...s.config, ...patch }));
+    if (s) updateStatus(await be.setConfig({ ...s.config, ...patch }));
   };
 
   onMount(async () => {
@@ -66,18 +75,21 @@ export function App(props: { backend: Backend }) {
       setCustomMode(true);
     }
     setDevices(await be.listDevices());
-    const unlisten = await be.onStatusChanged(setStatus);
+    const unlisten = await be.onStatusChanged(updateStatus);
     const poll = setInterval(async () => {
-      setStatus(await be.getStatus());
-      setDevices(await be.listDevices());
+      updateStatus(await be.getStatus());
+      updateDevices(await be.listDevices());
     }, 2000);
     const tick = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     onCleanup(() => (unlisten(), clearInterval(poll), clearInterval(tick)));
   });
 
   // Nouveau QR quand : l'adresse change, le serveur (re)démarre, un téléphone vient de s'appairer, ou le code expire.
-  createEffect(on(() => status()?.origin ?? null, (origin) => (origin ? void refreshPairing() : setPairing(null))));
-  createEffect(on(() => devices().length, (n, prev) => prev !== undefined && n > prev && void refreshPairing()));
+  // Les mémos évitent de réagir à chaque interrogation périodique : seul un vrai changement compte.
+  const origin = createMemo(() => status()?.origin ?? null);
+  const deviceCount = createMemo(() => devices().length);
+  createEffect(on(origin, (o) => (o ? void refreshPairing() : setPairing(null))));
+  createEffect(on(deviceCount, (n, prev) => prev !== undefined && n > prev && void refreshPairing()));
   const expiresIn = () => CODE_TTL - (now() - pairedAt());
   createEffect(() => {
     if (pairing() && expiresIn() <= 0) void refreshPairing();

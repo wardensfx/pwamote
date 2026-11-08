@@ -19,14 +19,17 @@ pub fn rank_ipv4s(ips: impl IntoIterator<Item = Ipv4Addr>) -> Vec<Ipv4Addr> {
         .into_iter()
         .filter(|ip| ip.is_private() && !ip.is_loopback() && !ip.is_link_local())
         .collect();
+    // Le départage par l'adresse rend l'ordre identique d'un appel à l'autre, quel que soit
+    // l'ordre dans lequel le système énumère les interfaces.
     out.sort_by_key(|ip| {
         let o = ip.octets();
-        match o {
+        let rank = match o {
             [192, 168, ..] => 0,
             [10, ..] => 1,
             // 172.16/12 est souvent un réseau virtuel (WSL, Docker, Hyper-V).
             _ => 2,
-        }
+        };
+        (rank, o)
     });
     out.dedup();
     out
