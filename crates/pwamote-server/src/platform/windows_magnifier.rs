@@ -8,7 +8,9 @@ use pwamote_core::magnifier::{MagnifierController, Observation, Point, Rect};
 use pwamote_core::protocol::MagnifierAction;
 use pwamote_core::settings::MagnifierSettings;
 use windows::Win32::Foundation::{POINT, RECT};
-use windows::Win32::Graphics::Gdi::ClientToScreen;
+use windows::Win32::Graphics::Gdi::{
+    ClientToScreen, GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 use windows::Win32::UI::Magnification::{
     MagInitialize, MagSetFullscreenTransform, MagUninitialize,
 };
@@ -27,8 +29,28 @@ pub struct WindowsMagnifier {
     shared: Arc<Mutex<Shared>>,
 }
 
-fn primary_screen() -> Rect {
+/// Écran (moniteur) qui contient le point donné, en coordonnées du bureau virtuel :
+/// un écran placé à gauche de l'écran principal a des coordonnées négatives.
+fn screen_at(p: Point) -> Rect {
     unsafe {
+        let pt = POINT {
+            x: p.x as i32,
+            y: p.y as i32,
+        };
+        let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(monitor, &mut info).as_bool() {
+            let r = info.rcMonitor;
+            return Rect {
+                x: r.left as f32,
+                y: r.top as f32,
+                w: (r.right - r.left) as f32,
+                h: (r.bottom - r.top) as f32,
+            };
+        }
         Rect {
             x: 0.0,
             y: 0.0,
@@ -113,9 +135,10 @@ fn run(shared: Arc<Mutex<Shared>>) {
         let transform = {
             let mut s = shared.lock().expect("magnifier lock");
             let cfg = s.settings.clone();
+            let cursor = cursor();
             let obs = Observation {
-                screen: primary_screen(),
-                cursor: cursor(),
+                screen: screen_at(cursor),
+                cursor,
                 caret: caret(),
                 now_ms: started.elapsed().as_millis() as u64,
             };

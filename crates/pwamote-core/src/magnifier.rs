@@ -408,4 +408,36 @@ mod tests {
         let t = settle(&mut m, &o, &c).unwrap();
         assert_eq!((t.x, t.y), (1920.0, 0.0));
     }
+
+    #[test]
+    fn works_on_a_screen_placed_left_of_the_primary_one() {
+        // Écran secondaire à gauche : ses coordonnées sont négatives.
+        let left = Rect {
+            x: -1920.0,
+            y: 0.0,
+            w: 1920.0,
+            h: 1080.0,
+        };
+        let mut m = MagnifierController::new(&cfg());
+        m.set_active(true);
+        for cursor_x in [-1000.0, -1500.0, -1900.0, -1919.0] {
+            let o = Observation {
+                screen: left,
+                cursor: Point {
+                    x: cursor_x,
+                    y: 500.0,
+                },
+                caret: None,
+                now_ms: 0,
+            };
+            let t = settle(&mut m, &o, &cfg()).unwrap();
+            let view_w = left.w / t.zoom;
+            assert!(t.x >= left.x - 0.01, "x = {}", t.x);
+            assert!(
+                cursor_x >= t.x && cursor_x <= t.x + view_w,
+                "curseur hors de la vue : {cursor_x} / {}",
+                t.x
+            );
+        }
+    }
 }
