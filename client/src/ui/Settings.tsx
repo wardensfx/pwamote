@@ -4,6 +4,7 @@ import type { PointerMode } from "../generated/PointerMode";
 import type { Settings } from "../generated/Settings";
 import type { RemoteController } from "../lib/remote";
 import { forceUpdate } from "../lib/update";
+import { useScanner } from "./Recovery";
 
 function Segmented<T extends string>(props: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (
@@ -46,6 +47,7 @@ function Toggle(props: { label: string; checked: boolean; onChange: (v: boolean)
 
 export function SettingsSheet(props: { remote: RemoteController; onClose: () => void }): JSX.Element {
   const r = props.remote;
+  const scanner = useScanner(r);
   const s = () => r.settings();
   const set = (f: (s: Settings) => Settings, key: string) => r.edit(f, key);
   const pointer = (p: Partial<Settings["pointer"]>) =>
@@ -59,7 +61,7 @@ export function SettingsSheet(props: { remote: RemoteController; onClose: () => 
       <div class="glass sheet" role="dialog" aria-label="Réglages">
         <div class="grab" />
         <h2>Réglages</h2>
-        <Show when={s()} fallback={<p class="note">Connexion au PC…</p>}>
+        <Show when={s()} fallback={<p class="note">Les réglages s'afficheront une fois connecté au PC.</p>}>
           {(cfg) => (
             <>
               <h3>Pointage</h3>
@@ -108,27 +110,31 @@ export function SettingsSheet(props: { remote: RemoteController; onClose: () => 
               <h3>Clavier et retour</h3>
               <Toggle label="Modificateurs collants" checked={cfg().keyboard.sticky_modifiers} onChange={(sticky_modifiers) => set((x) => ({ ...x, keyboard: { sticky_modifiers } }), "keyboard.sticky")} />
               <Toggle label="Retour haptique" checked={cfg().feedback.haptics} onChange={(haptics) => set((x) => ({ ...x, feedback: { haptics } }), "feedback.haptics")} />
-
-              <h3>Appareil</h3>
-              <div class="row">
-                <button class="btn ghost small" onClick={() => r.recenter()}>
-                  Recentrer le curseur
-                </button>
-                <button class="btn ghost small" onClick={() => r.resetGyroAxes()}>
-                  Recalibrer le gyroscope
-                </button>
-                <button class="btn ghost small" onClick={() => r.forget()}>
-                  Oublier ce PC
-                </button>
-                <button class="btn ghost small" onClick={() => void forceUpdate()}>
-                  Mettre à jour l'app
-                </button>
-              </div>
-              <p class="note">Version de l'app : {__BUILD_ID__}. « Mettre à jour » recharge la dernière version sans vous déconnecter du PC.</p>
-              <p class="note">Les réglages sont enregistrés sur le PC : tous vos téléphones partagent les mêmes.</p>
             </>
           )}
         </Show>
+
+        <h3>Appareil</h3>
+        <div class="row">
+          <button class="btn ghost small" onClick={() => r.recenter()}>
+            Recentrer le curseur
+          </button>
+          <button class="btn ghost small" onClick={() => r.resetGyroAxes()}>
+            Recalibrer le gyroscope
+          </button>
+          <button class="btn ghost small" onClick={scanner.open}>
+            Scanner un QR code
+          </button>
+          <button class="btn ghost small" onClick={() => void forceUpdate()}>
+            Mettre à jour l'app
+          </button>
+          <button class="btn ghost small" onClick={() => r.forget()}>
+            Oublier ce PC
+          </button>
+        </div>
+        {scanner.view()}
+        <p class="note">Version de l'app : {__BUILD_ID__}. « Mettre à jour » recharge la dernière version sans vous déconnecter du PC.</p>
+        <p class="note">Les réglages sont enregistrés sur le PC : tous vos téléphones partagent les mêmes. Ces boutons restent disponibles même quand le PC ne répond pas.</p>
       </div>
     </>
   );

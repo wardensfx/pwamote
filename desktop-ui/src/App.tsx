@@ -259,6 +259,10 @@ export function App(props: { backend: Backend }) {
                   <li>Réglages › Général › Informations › Réglages des certificats : activez la confiance pour « PwaMote Local CA ».</li>
                   <li>Scannez ensuite le QR code ci-dessus.</li>
                 </ol>
+                <p class="hint">
+                  Le téléphone ne trouve plus le PC après une recompilation ou une réinstallation ? Windows a peut-être bloqué le nouvel exécutable : autorisez PwaMote
+                  sur les réseaux privés dans Sécurité Windows › Pare-feu › Autoriser une application.
+                </p>
               </details>
             </section>
 
