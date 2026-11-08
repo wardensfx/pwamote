@@ -1,5 +1,6 @@
 import { batch, createSignal } from "solid-js";
 import type { ClientMessage } from "../generated/ClientMessage";
+import type { DeckView } from "../generated/DeckView";
 import type { Key } from "../generated/Key";
 import type { MagnifierAction } from "../generated/MagnifierAction";
 import type { Modifier } from "../generated/Modifier";
@@ -14,6 +15,10 @@ import { StickyModifiers } from "./modifiers";
 import { MotionSource, requestMotionPermission, saveAxisMap, type MotionPermission } from "./motion";
 import { OrientationSource } from "./orientation";
 import { SettingsSync, type Edit } from "./settings-sync";
+import type { Values } from "./actions";
+
+/** État visible d'un bouton d'action juste après un appui. */
+export type ActionState = "running" | "ok" | "error";
 
 export type Phase = "needs-pairing" | "connecting" | "ready" | "offline" | "rejected";
 
@@ -36,6 +41,11 @@ export class RemoteController {
   private modsSig = createSignal<Modifier[]>([]);
   private errorSig = createSignal<string | null>(null);
   private clutchSig = createSignal(false);
+  private deckSig = createSignal<DeckView | null>(null);
+  private actionStatesSig = createSignal<Record<string, ActionState>>({});
+  private actionErrorSig = createSignal<string | null>(null);
+  private actionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private actionErrorTimer: ReturnType<typeof setTimeout> | null = null;
 
   private sync = new SettingsSync((s) => {
     this.settingsSig[1](s);
@@ -51,6 +61,9 @@ export class RemoteController {
   readonly activeModifiers = () => this.modsSig[0]();
   readonly error = () => this.errorSig[0]();
   readonly clutch = () => this.clutchSig[0]();
+  readonly deck = () => this.deckSig[0]();
+  readonly actionStates = () => this.actionStatesSig[0]();
+  readonly actionError = () => this.actionErrorSig[0]();
 
   get paired(): boolean {
     return this.identity !== null;
@@ -114,6 +127,13 @@ export class RemoteController {
       case "magnifier_state":
         this.magnifierSig[1]({ active: m.active, zoom: m.zoom });
         break;
+      case "deck":
+        this.deckSig[1](m.deck);
+        break;
+      case "action_result":
+        this.setActionState(m.id, m.ok ? "ok" : "error", 900);
+        if (!m.ok) this.showActionError(m.message ?? "L'action a échoué sur le PC.");
+        break;
       case "error":
         if (m.code === "unauthorized") {
           // Le PC ne nous connaît plus (appareil révoqué) : il faut ré-appairer.
@@ -146,6 +166,7 @@ export class RemoteController {
     batch(() => {
       this.phaseSig[1]("needs-pairing");
       this.settingsSig[1](null);
+      this.deckSig[1](null);
     });
   }
 
@@ -210,6 +231,35 @@ export class RemoteController {
 
   scroll(dx: number, dy: number): void {
     this.conn?.sendBinary(encodeScroll(dx, dy));
+  }
+
+  // ----- Actions programmables -----
+
+  /** Lance un bouton du panneau. Le PC vérifie qu'il existe et valide chaque valeur. */
+  runAction(id: string, values: Values = {}): void {
+    this.hapticIf("tap");
+    // Sans réponse (ancien serveur, réseau coupé), le bouton revient au repos.
+    this.setActionState(id, "running", 8000);
+    this.send({ t: "run_action", id, values });
+  }
+
+  private setActionState(id: string, state: ActionState, clearAfter: number): void {
+    const prev = this.actionTimers.get(id);
+    if (prev) clearTimeout(prev);
+    this.actionStatesSig[1]((s) => ({ ...s, [id]: state }));
+    this.actionTimers.set(
+      id,
+      setTimeout(() => {
+        this.actionTimers.delete(id);
+        this.actionStatesSig[1](({ [id]: _, ...rest }) => rest);
+      }, clearAfter),
+    );
+  }
+
+  private showActionError(message: string): void {
+    if (this.actionErrorTimer) clearTimeout(this.actionErrorTimer);
+    this.actionErrorSig[1](message);
+    this.actionErrorTimer = setTimeout(() => this.actionErrorSig[1](null), 4000);
   }
 
   // ----- Gyroscope -----

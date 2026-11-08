@@ -7,6 +7,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use std::collections::BTreeMap;
+
+use crate::actions::{DeckView, InputValue};
 use crate::settings::{Settings, VersionedSettings};
 
 /// Version du protocole. Le serveur refuse un client d'une version majeure différente.
@@ -137,6 +140,12 @@ pub enum ClientMessage {
         base_rev: u64,
         settings: Settings,
     },
+    /// Lance un bouton du panneau d'actions, avec les valeurs saisies pour ses champs.
+    RunAction {
+        id: String,
+        #[serde(default)]
+        values: BTreeMap<String, InputValue>,
+    },
     Ping {
         id: u32,
     },
@@ -176,6 +185,16 @@ pub enum ServerMessage {
     MagnifierState {
         active: bool,
         zoom: f32,
+    },
+    /// Le panneau d'actions (à l'ouverture de la session et à chaque modification sur le PC).
+    Deck {
+        deck: DeckView,
+    },
+    /// Fin d'une action lancée par ce téléphone.
+    ActionResult {
+        id: String,
+        ok: bool,
+        message: Option<String>,
     },
     Error {
         code: ErrorCode,
@@ -353,6 +372,21 @@ mod tests {
             serde_json::to_string(&Key::PageDown).unwrap(),
             "\"page_down\""
         );
+    }
+
+    #[test]
+    fn parses_a_run_action_message() {
+        let raw = r#"{"t":"run_action","id":"slower","values":{"speed":1.5,"site":"yt"}}"#;
+        match serde_json::from_str::<ClientMessage>(raw).unwrap() {
+            ClientMessage::RunAction { id, values } => {
+                assert_eq!(id, "slower");
+                assert_eq!(values["speed"], InputValue::Number(1.5));
+                assert_eq!(values["site"], InputValue::Text("yt".into()));
+            }
+            other => panic!("{other:?}"),
+        }
+        let bare: ClientMessage = serde_json::from_str(r#"{"t":"run_action","id":"x"}"#).unwrap();
+        assert!(matches!(bare, ClientMessage::RunAction { values, .. } if values.is_empty()));
     }
 
     #[test]

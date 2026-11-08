@@ -7,6 +7,7 @@ Le téléphone comme télécommande du PC, façon Wiimote.
 - **Clic gauche / clic droit** sur deux grandes zones, avec retour haptique.
 - **Clavier déplié** avec Ctrl, Maj, Alt, Win, Échap, flèches… Les modificateurs sont « collants ».
 - **Loupe intelligente** autour du curseur ou de la zone de saisie.
+- **Actions programmables**, façon Stream Deck : des pages de boutons définies sur le PC, qui simulent des touches (y compris pour les extensions du navigateur), tapent du texte, lancent des programmes ou des scripts, ouvrent des adresses. Une action peut demander des valeurs au téléphone avant de partir : liste, curseur, nombre, texte, interrupteur.
 - **Appairage en un scan** (QR code), reconnexion automatique, réglages mémorisés et synchronisés entre PC et téléphones.
 
 Cible actuelle : serveur **Windows 11**, client **iPhone** (Safari, installable sur l'écran d'accueil). Voir [docs/architecture.md](docs/architecture.md).
@@ -23,7 +24,7 @@ cd desktop-ui; npm ci; npm run build; cd ..     # l'interface de la fenêtre
 cargo run --release -p pwamote-desktop          # l'application de bureau
 ```
 
-L'application s'ouvre avec le **QR code** et l'état du serveur. Elle vit ensuite dans la **barre système** : fermer la fenêtre la réduit, un clic sur l'icône la rouvre, le menu de l'icône active ou arrête le serveur et quitte. Dans la fenêtre : adresse encodée dans le QR (IPv4, nom `.local` ou saisie libre), lancement avec Windows, démarrage réduit, port, liste des appareils associés.
+L'application s'ouvre avec le **QR code** et l'état du serveur. L'onglet **Actions** édite le panneau d'actions du téléphone (pages, grille, étapes, champs) et permet d'essayer une action sur le PC. Elle vit ensuite dans la **barre système** : fermer la fenêtre la réduit, un clic sur l'icône la rouvre, le menu de l'icône active ou arrête le serveur et quitte. Dans la fenêtre : adresse encodée dans le QR (IPv4, nom `.local` ou saisie libre), lancement avec Windows, démarrage réduit, port, liste des appareils associés.
 
 L'installeur Windows (`.exe`, installation par utilisateur) est produit par la CI : artefact `pwamote-installer-windows`.
 
@@ -68,3 +69,5 @@ Trunk-based development : branches courtes, intégration fréquente dans `main`,
 | Caret via UI Automation (navigateurs, Electron) | à faire |
 | Boutons de volume du téléphone | impossible en PWA, voir l'architecture |
 | Application de bureau : fenêtre, barre système, démarrage avec Windows, choix de l'adresse du QR | écrite, interface vérifiée dans un navigateur, à valider sur Windows |
+| Actions programmables : modèle, validation, protocole, panneau du téléphone, éditeur | fait, testé (bout en bout avec faux système) ; panneau et éditeur vérifiés dans un navigateur |
+| Actions : lancement de programmes, ouverture (`ShellExecuteW`), touches avec code de balayage | écrit, compilé pour Windows, à valider sur Windows |

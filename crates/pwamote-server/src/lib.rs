@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod bootstrap;
 pub mod config;
 pub mod input;
@@ -9,3 +10,6 @@ pub mod state;
 pub mod supervisor;
 pub mod tls;
 pub mod web;
+
+/// Le cœur, pour l’application de bureau (types du panneau d’actions).
+pub use pwamote_core;

@@ -1,11 +1,12 @@
 import { Match, Show, Switch, createSignal } from "solid-js";
 import { parseScannedLink } from "../lib/identity";
 import type { RemoteController } from "../lib/remote";
+import { ActionPanel } from "./Actions";
 import { Keyboard } from "./Keyboard";
 import { Pad } from "./Pad";
 import { QrScanner } from "./QrScanner";
 import { SettingsSheet } from "./Settings";
-import { CenterIcon, GearIcon, KeyboardIcon, LoupeIcon } from "./icons";
+import { CenterIcon, DeckIcon, GearIcon, KeyboardIcon, LoupeIcon } from "./icons";
 
 const Mark = () => (
   <div class="mark">
@@ -72,7 +73,9 @@ function Problem(props: { remote: RemoteController }) {
 
 function Remote(props: { remote: RemoteController }) {
   const r = props.remote;
-  const [keyboard, setKeyboard] = createSignal(false);
+  // Un seul panneau à la fois entre la surface de pointage et les clics.
+  const [panel, setPanel] = createSignal<"keyboard" | "actions" | null>(null);
+  const toggle = (p: "keyboard" | "actions") => setPanel(panel() === p ? null : p);
   const [settings, setSettings] = createSignal(false);
   const down = (b: "left" | "right") => {
     const [on, set] = createSignal(false);
@@ -114,10 +117,19 @@ function Remote(props: { remote: RemoteController }) {
         </button>
       </div>
 
-      <Pad remote={r} onTouch={() => setKeyboard(false)} />
+      {/* Toucher la surface ferme le clavier (et celui de l'iPhone), pas le panneau d'actions : on vise puis on appuie. */}
+      <Pad remote={r} onTouch={() => panel() === "keyboard" && setPanel(null)} />
 
-      <Show when={keyboard()}>
+      <Show when={panel() === "keyboard"}>
         <Keyboard remote={r} />
+      </Show>
+      <Show when={panel() === "actions"}>
+        <ActionPanel remote={r} />
+      </Show>
+      <Show when={r.actionError()}>
+        <div class="glass toast bad" role="alert">
+          {r.actionError()}
+        </div>
       </Show>
 
       <div class="clicks">
@@ -136,8 +148,11 @@ function Remote(props: { remote: RemoteController }) {
         <button class="glass chip" onClick={() => r.recenter()}>
           <CenterIcon /> Centrer
         </button>
-        <button class="glass chip" aria-pressed={keyboard()} onClick={() => setKeyboard(!keyboard())}>
+        <button class="glass chip" aria-pressed={panel() === "keyboard"} onClick={() => toggle("keyboard")}>
           <KeyboardIcon /> Clavier
+        </button>
+        <button class="glass chip" aria-pressed={panel() === "actions"} onClick={() => toggle("actions")}>
+          <DeckIcon /> Actions
         </button>
       </div>
 

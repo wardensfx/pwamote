@@ -1,5 +1,56 @@
 // Faux serveur pour développer et vérifier l'interface dans un simple navigateur.
-import type { Backend, AppConfig, DeviceView, ServerStatus } from "./ipc";
+import type { Backend, AppConfig, Deck, DeviceView, ServerStatus } from "./ipc";
+
+const keys = (id: string, label: string, icon: string, key: string, modifiers: string[] = [], color = "glass") =>
+  ({ id, label, icon, color, inputs: [], steps: [{ kind: "keys", key, modifiers }] }) as never;
+
+/** Même exemple que le premier lancement du serveur, plus une action qui lance un script. */
+const exampleDeck = (): Deck => ({
+  pages: [
+    {
+      id: "video",
+      name: "Vidéo",
+      columns: 3,
+      rows: 2,
+      cells: [
+        keys("slower", "Ralentir", "🐢", "s", [], "blue"),
+        keys("faster", "Accélérer", "🐇", "d", [], "amber"),
+        keys("key_q", "Touche Q", "Q", "q"),
+        keys("play", "Lecture / pause", "⏯", "media_play_pause"),
+        keys("fullscreen", "Plein écran", "⛶", "f"),
+        {
+          id: "speed",
+          label: "Vitesse précise",
+          icon: "⏱",
+          color: "violet",
+          inputs: [{ id: "vitesse", label: "Vitesse", kind: { type: "slider", min: 0.25, max: 4, step: 0.25, default: 1, unit: "×" } }],
+          steps: [{ kind: "run", program: "powershell.exe", args: ["-NoProfile", "-File", "C:\\Scripts\\vitesse.ps1", "{vitesse}"], cwd: "", hidden: true }],
+        },
+      ],
+    },
+    {
+      id: "shortcuts",
+      name: "Raccourcis",
+      columns: 3,
+      rows: 2,
+      cells: [
+        keys("copy", "Copier", "⧉", "c", ["ctrl"]),
+        keys("paste", "Coller", "📋", "v", ["ctrl"]),
+        keys("undo", "Annuler", "↶", "z", ["ctrl"]),
+        keys("desktop", "Bureau", "🖥", "d", ["meta"]),
+        keys("capture", "Capture", "✂", "s", ["meta", "shift"]),
+        {
+          id: "youtube",
+          label: "Chercher sur YouTube",
+          icon: "🔎",
+          color: "red",
+          inputs: [{ id: "recherche", label: "Recherche", kind: { type: "text", default: "", placeholder: "Titre, chaîne…" } }],
+          steps: [{ kind: "open", target: "https://www.youtube.com/results?search_query={recherche:url}" }],
+        },
+      ],
+    },
+  ],
+});
 
 function fakeQr(seed: string): string {
   const n = 29;
@@ -36,6 +87,7 @@ export function mockBackend(): Backend {
     { id: "a", name: "iPhone", paired_at: now() - 86400 * 3, last_seen: now() - 40 },
     { id: "b", name: "iPad", paired_at: now() - 86400 * 9, last_seen: now() - 86400 * 2 },
   ];
+  let deck = exampleDeck();
   const subs = new Set<(s: ServerStatus) => void>();
   const status = (): ServerStatus => {
     const host = config.address.kind === "mdns" ? "pwamote-yann-pc.local" : config.address.kind === "ip" ? config.address.ip : config.address.kind === "custom" ? config.address.host : "192.168.1.20";
@@ -60,6 +112,13 @@ export function mockBackend(): Backend {
     },
     listDevices: async () => devices,
     revokeDevice: async (id) => ((devices = devices.filter((d) => d.id !== id)), true),
+    getDeck: async () => JSON.parse(JSON.stringify(deck)),
+    setDeck: async (d) => ((deck = JSON.parse(JSON.stringify(d))), JSON.parse(JSON.stringify(deck))),
+    testAction: async (id) => {
+      await new Promise((r) => setTimeout(r, 300));
+      const b = deck.pages.flatMap((p) => p.cells).find((c) => c?.id === id);
+      if (b?.steps.some((s) => s.kind === "run")) throw new Error("programme introuvable : powershell.exe (simulation)");
+    },
     hasBackdrop: async () => false,
     dataDir: async () => "C:\\Users\\Yann\\AppData\\Roaming\\PwaMote",
     onStatusChanged: async (cb) => (subs.add(cb), () => void subs.delete(cb)),

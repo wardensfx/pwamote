@@ -13,6 +13,7 @@ use pwamote_core::protocol::ServerMessage;
 use rust_embed::RustEmbed;
 use std::net::SocketAddr;
 
+use crate::actions::ActionJob;
 use crate::session::Session;
 use crate::state::AppState;
 use crate::tls::Pki;
@@ -111,11 +112,39 @@ async fn send(
     }
 }
 
+/// Lance une action hors de la boucle du WebSocket ; son résultat revient par `done`.
+fn spawn_job(
+    app: &Arc<AppState>,
+    job: ActionJob,
+    done: tokio::sync::mpsc::UnboundedSender<ServerMessage>,
+) {
+    let Some(slot) = app.try_begin_action() else {
+        let _ = done.send(ServerMessage::ActionResult {
+            id: job.id,
+            ok: false,
+            message: Some("trop d'actions en cours, réessayez dans un instant".into()),
+        });
+        return;
+    };
+    let app = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let result = app.run_job(&job);
+        drop(slot);
+        let _ = done.send(ServerMessage::ActionResult {
+            id: job.id,
+            ok: result.is_ok(),
+            message: result.err(),
+        });
+    });
+}
+
 pub async fn serve_socket(socket: WebSocket, app: Arc<AppState>) {
     let (mut tx, mut rx) = socket.split();
     let mut settings_rx = app.subscribe_settings();
     let mut revoked_rx = app.subscribe_revocations();
-    let mut session = Session::new(app);
+    let mut deck_rx = app.subscribe_deck();
+    let (done_tx, mut done_rx) = tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
+    let mut session = Session::new(app.clone());
 
     loop {
         tokio::select! {
@@ -132,6 +161,9 @@ pub async fn serve_socket(socket: WebSocket, app: Arc<AppState>) {
                         if out.close {
                             let _ = tx.send(Message::Close(None)).await;
                             break;
+                        }
+                        for job in out.jobs {
+                            spawn_job(&app, job, done_tx.clone());
                         }
                     }
                     Message::Binary(bytes) => session.on_binary(&bytes),
@@ -150,6 +182,22 @@ pub async fn serve_socket(socket: WebSocket, app: Arc<AppState>) {
                         let _ = tx.send(Message::Close(None)).await;
                         break;
                     }
+                }
+            }
+            Some(result) = done_rx.recv() => {
+                if !send(&mut tx, &result).await {
+                    break;
+                }
+            }
+            deck = deck_rx.recv() => {
+                match deck {
+                    Ok(deck) if session.device_id().is_some() => {
+                        if !send(&mut tx, &ServerMessage::Deck { deck }).await {
+                            break;
+                        }
+                    }
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
             changed = settings_rx.recv() => {

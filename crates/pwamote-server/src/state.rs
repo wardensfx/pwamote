@@ -5,11 +5,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
+use pwamote_core::actions::{ActionError, Deck, DeckView, InputValue};
 use pwamote_core::pairing::{Device, PairingError, PairingRegistry};
 use pwamote_core::settings::{Conflict, Settings, SettingsStore, VersionedSettings};
 use rand::Rng as _;
 use tokio::sync::broadcast;
 
+use crate::actions::{ActionJob, Launcher, MAX_CONCURRENT_ACTIONS};
 use crate::config::AppConfig;
 use crate::input::{InputSink, MagnifierSink};
 
@@ -18,6 +20,7 @@ pub trait Persist: Send + Sync {
     fn save_settings(&self, settings: &VersionedSettings);
     fn save_devices(&self, registry: &PairingRegistry);
     fn save_config(&self, config: &AppConfig);
+    fn save_deck(&self, deck: &Deck);
 }
 
 /// Fichiers JSON dans le dossier de données de l'utilisateur
@@ -29,6 +32,7 @@ pub struct JsonFiles {
 const SETTINGS_FILE: &str = "settings.json";
 const DEVICES_FILE: &str = "devices.json";
 const CONFIG_FILE: &str = "config.json";
+const DECK_FILE: &str = "actions.json";
 
 impl JsonFiles {
     pub fn new(dir: impl Into<PathBuf>) -> std::io::Result<Self> {
@@ -80,6 +84,14 @@ impl JsonFiles {
     pub fn load_devices(&self) -> PairingRegistry {
         self.read(DEVICES_FILE).unwrap_or_default()
     }
+
+    /// Le panneau d'actions ; au tout premier lancement, un exemple à adapter.
+    pub fn load_deck(&self) -> Deck {
+        if !self.dir.join(DECK_FILE).exists() {
+            return Deck::example();
+        }
+        self.read(DECK_FILE).unwrap_or_default()
+    }
 }
 
 impl Persist for JsonFiles {
@@ -92,6 +104,9 @@ impl Persist for JsonFiles {
     fn save_config(&self, config: &AppConfig) {
         self.write(CONFIG_FILE, config);
     }
+    fn save_deck(&self, deck: &Deck) {
+        self.write(DECK_FILE, deck);
+    }
 }
 
 /// Persistance en mémoire, pour les tests.
@@ -100,6 +115,7 @@ pub struct MemoryPersist {
     pub settings: Mutex<Option<VersionedSettings>>,
     pub devices: Mutex<Option<PairingRegistry>>,
     pub config: Mutex<Option<AppConfig>>,
+    pub deck: Mutex<Option<Deck>>,
 }
 
 impl Persist for MemoryPersist {
@@ -111,6 +127,9 @@ impl Persist for MemoryPersist {
     }
     fn save_config(&self, config: &AppConfig) {
         *self.config.lock().unwrap() = Some(config.clone());
+    }
+    fn save_deck(&self, deck: &Deck) {
+        *self.deck.lock().unwrap() = Some(deck.clone());
     }
 }
 
@@ -131,6 +150,14 @@ pub fn random_token(bytes: usize) -> String {
 struct Shared {
     settings: SettingsStore,
     registry: PairingRegistry,
+    deck: Deck,
+}
+
+/// Les ports vers le système : saisie, loupe, programmes.
+pub struct Sinks {
+    pub input: Arc<dyn InputSink>,
+    pub magnifier: Arc<dyn MagnifierSink>,
+    pub launcher: Arc<dyn Launcher>,
 }
 
 pub struct AppState {
@@ -138,37 +165,137 @@ pub struct AppState {
     persist: Arc<dyn Persist>,
     pub input: Arc<dyn InputSink>,
     pub magnifier: Arc<dyn MagnifierSink>,
+    pub launcher: Arc<dyn Launcher>,
     settings_tx: broadcast::Sender<VersionedSettings>,
     revoked_tx: broadcast::Sender<String>,
+    deck_tx: broadcast::Sender<DeckView>,
     connected: std::sync::atomic::AtomicUsize,
+    actions_running: Arc<std::sync::atomic::AtomicUsize>,
     pub server_name: String,
+}
+
+/// Une place réservée parmi les actions en cours ; rendue à la destruction.
+pub struct ActionSlot(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for ActionSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+fn short_id() -> String {
+    random_token(6)
 }
 
 impl AppState {
     pub fn new(
         settings: VersionedSettings,
         registry: PairingRegistry,
+        deck: Deck,
         persist: Arc<dyn Persist>,
-        input: Arc<dyn InputSink>,
-        magnifier: Arc<dyn MagnifierSink>,
+        sinks: Sinks,
         server_name: String,
     ) -> Arc<Self> {
         let (settings_tx, _) = broadcast::channel(16);
         let (revoked_tx, _) = broadcast::channel(16);
-        magnifier.configure(&settings.settings.magnifier);
+        let (deck_tx, _) = broadcast::channel(4);
+        sinks.magnifier.configure(&settings.settings.magnifier);
         Arc::new(Self {
             shared: Mutex::new(Shared {
                 settings: SettingsStore::new(settings.rev, settings.settings),
                 registry,
+                deck: deck.sanitized(&mut short_id),
             }),
             persist,
-            input,
-            magnifier,
+            input: sinks.input,
+            magnifier: sinks.magnifier,
+            launcher: sinks.launcher,
             settings_tx,
             revoked_tx,
+            deck_tx,
             connected: std::sync::atomic::AtomicUsize::new(0),
+            actions_running: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             server_name,
         })
+    }
+
+    // ----- Actions programmables -----
+
+    pub fn deck(&self) -> Deck {
+        self.lock().deck.clone()
+    }
+
+    pub fn deck_view(&self) -> DeckView {
+        self.lock().deck.view()
+    }
+
+    pub fn subscribe_deck(&self) -> broadcast::Receiver<DeckView> {
+        self.deck_tx.subscribe()
+    }
+
+    /// Remplace le panneau (depuis la fenêtre du PC uniquement), l'enregistre et le diffuse.
+    pub fn set_deck(&self, deck: Deck) -> Deck {
+        let deck = deck.sanitized(&mut short_id);
+        let changed = {
+            let mut shared = self.lock();
+            let changed = shared.deck != deck;
+            shared.deck = deck.clone();
+            changed
+        };
+        if changed {
+            self.persist.save_deck(&deck);
+            let _ = self.deck_tx.send(deck.view());
+        }
+        deck
+    }
+
+    /// Valide une demande d'action : le bouton doit exister, les valeurs respecter ses champs.
+    pub fn plan_action(
+        &self,
+        id: &str,
+        values: &std::collections::BTreeMap<String, InputValue>,
+    ) -> Result<ActionJob, ActionError> {
+        let shared = self.lock();
+        let button = shared.deck.button(id).ok_or(ActionError::UnknownAction)?;
+        Ok(ActionJob {
+            id: id.to_string(),
+            plan: button.plan(values)?,
+        })
+    }
+
+    /// Réserve une place pour une action, ou `None` s'il y en a déjà trop en cours.
+    pub fn try_begin_action(&self) -> Option<ActionSlot> {
+        use std::sync::atomic::Ordering;
+        let mut n = self.actions_running.load(Ordering::Acquire);
+        loop {
+            if n >= MAX_CONCURRENT_ACTIONS {
+                return None;
+            }
+            match self.actions_running.compare_exchange_weak(
+                n,
+                n + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Some(ActionSlot(self.actions_running.clone())),
+                Err(current) => n = current,
+            }
+        }
+    }
+
+    /// Exécute une action (bloquant : les pauses dorment vraiment).
+    pub fn run_job(&self, job: &ActionJob) -> Result<(), String> {
+        let result = crate::actions::execute(
+            &job.plan,
+            self.input.as_ref(),
+            self.launcher.as_ref(),
+            &std::thread::sleep,
+        );
+        match &result {
+            Ok(()) => tracing::info!(action = %job.id, "action exécutée"),
+            Err(e) => tracing::warn!(action = %job.id, error = %e, "action en échec"),
+        }
+        result
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Shared> {
@@ -274,6 +401,7 @@ impl AppState {
 #[cfg(test)]
 pub mod testing {
     use super::*;
+    use crate::actions::testing::FakeLauncher;
     use crate::input::{apply_action, MagnifierStatus};
     use pwamote_core::magnifier::MagnifierController;
     use pwamote_core::pointer::WheelDelta;
@@ -349,11 +477,13 @@ pub mod testing {
         pub state: Arc<AppState>,
         pub input: Arc<FakeInput>,
         pub persist: Arc<MemoryPersist>,
+        pub launcher: Arc<FakeLauncher>,
     }
 
     pub fn fixture() -> Fixture {
         let input = Arc::new(FakeInput::default());
         let persist = Arc::new(MemoryPersist::default());
+        let launcher = Arc::new(FakeLauncher::default());
         let magnifier = Arc::new(FakeMagnifier(Mutex::new(MagnifierController::new(
             &MagnifierSettings::default(),
         ))));
@@ -363,15 +493,20 @@ pub mod testing {
                 settings: Settings::default(),
             },
             PairingRegistry::default(),
+            Deck::example(),
             persist.clone(),
-            input.clone(),
-            magnifier,
+            Sinks {
+                input: input.clone(),
+                magnifier,
+                launcher: launcher.clone(),
+            },
             "Test PC".into(),
         );
         Fixture {
             state,
             input,
             persist,
+            launcher,
         }
     }
 }
@@ -448,6 +583,54 @@ mod tests {
 
         std::fs::write(dir.path().join(SETTINGS_FILE), "{ not json").unwrap();
         assert_eq!(files.load_settings().rev, 0);
+    }
+
+    #[test]
+    fn deck_changes_are_sanitized_persisted_and_broadcast() {
+        let f = fixture();
+        let mut rx = f.state.subscribe_deck();
+        let mut deck = f.state.deck();
+        deck.pages[0].name = "  Films  ".into();
+        deck.pages[0].columns = 42;
+        let saved = f.state.set_deck(deck);
+        assert_eq!(saved.pages[0].name, "Films");
+        assert_eq!(saved.pages[0].columns, pwamote_core::actions::MAX_COLUMNS);
+        assert_eq!(f.persist.deck.lock().unwrap().clone().unwrap(), saved);
+        assert_eq!(rx.try_recv().unwrap(), saved.view());
+        // Même panneau : ni écriture ni diffusion.
+        f.state.set_deck(saved);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn plan_action_checks_the_button_exists() {
+        let f = fixture();
+        let none = std::collections::BTreeMap::new();
+        assert!(f.state.plan_action("slower", &none).is_ok());
+        assert_eq!(
+            f.state.plan_action("inconnu", &none),
+            Err(ActionError::UnknownAction)
+        );
+    }
+
+    #[test]
+    fn concurrent_actions_are_capped() {
+        let f = fixture();
+        let slots: Vec<_> = (0..MAX_CONCURRENT_ACTIONS)
+            .map(|_| f.state.try_begin_action().unwrap())
+            .collect();
+        assert!(f.state.try_begin_action().is_none());
+        drop(slots);
+        assert!(f.state.try_begin_action().is_some());
+    }
+
+    #[test]
+    fn deck_file_starts_with_the_example_then_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = JsonFiles::new(dir.path()).unwrap();
+        assert_eq!(files.load_deck(), Deck::example());
+        files.save_deck(&Deck::default());
+        assert_eq!(files.load_deck(), Deck::default());
     }
 
     #[test]

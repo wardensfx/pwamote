@@ -304,6 +304,36 @@ impl Supervisor {
         self.app.revoke(device_id)
     }
 
+    /// Le panneau d'actions complet, étapes comprises (réservé à la fenêtre du PC).
+    pub fn deck(&self) -> pwamote_core::actions::Deck {
+        self.app.deck()
+    }
+
+    /// Enregistre le panneau et le pousse aux téléphones connectés. Renvoie la version nettoyée.
+    pub fn set_deck(&self, deck: pwamote_core::actions::Deck) -> pwamote_core::actions::Deck {
+        self.app.set_deck(deck)
+    }
+
+    /// Essai d'une action depuis la fenêtre du PC, avec les valeurs par défaut de ses champs.
+    pub async fn test_action(&self, id: &str) -> Result<(), String> {
+        let job = self
+            .app
+            .plan_action(id, &Default::default())
+            .map_err(|e| e.to_string())?;
+        let slot = self
+            .app
+            .try_begin_action()
+            .ok_or_else(|| "trop d'actions en cours".to_string())?;
+        let app = self.app.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = app.run_job(&job);
+            drop(slot);
+            result
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+
     /// Certificat de l'autorité locale, à faire installer sur le téléphone.
     pub fn ca_cert_pem(&self) -> &str {
         self.pki.ca_cert_pem()
@@ -390,6 +420,16 @@ mod tests {
         let mut out = Vec::new();
         let _ = tls.read_to_end(&mut out).await;
         Ok(String::from_utf8_lossy(&out).into_owned())
+    }
+
+    #[tokio::test]
+    async fn test_action_runs_with_default_values() {
+        let (sup, _p, _pki) = supervisor(ephemeral());
+        sup.test_action("youtube").await.unwrap();
+        assert!(sup.test_action("inconnu").await.is_err());
+        let mut deck = sup.deck();
+        deck.pages.truncate(1);
+        assert_eq!(sup.set_deck(deck).pages.len(), 1);
     }
 
     #[tokio::test]

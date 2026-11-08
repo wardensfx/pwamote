@@ -1,9 +1,10 @@
 import type { AppConfig } from "../../client/src/generated/AppConfig";
+import type { Deck } from "../../client/src/generated/Deck";
 import type { DeviceView } from "../../client/src/generated/DeviceView";
 import type { PairingInfo } from "../../client/src/generated/PairingInfo";
 import type { ServerStatus } from "../../client/src/generated/ServerStatus";
 
-export type { AppConfig, DeviceView, PairingInfo, ServerStatus };
+export type { AppConfig, Deck, DeviceView, PairingInfo, ServerStatus };
 
 export interface Backend {
   getStatus(): Promise<ServerStatus>;
@@ -12,6 +13,11 @@ export interface Backend {
   newPairing(): Promise<PairingInfo>;
   listDevices(): Promise<DeviceView[]>;
   revokeDevice(id: string): Promise<boolean>;
+  getDeck(): Promise<Deck>;
+  /** Enregistre le panneau ; renvoie la version nettoyée par le serveur. */
+  setDeck(deck: Deck): Promise<Deck>;
+  /** Exécute une action sur ce PC, avec les valeurs par défaut de ses champs. */
+  testAction(id: string): Promise<void>;
   hasBackdrop(): Promise<boolean>;
   dataDir(): Promise<string>;
   onStatusChanged(cb: (s: ServerStatus) => void): Promise<() => void>;
@@ -29,6 +35,9 @@ async function tauriBackend(): Promise<Backend> {
     newPairing: () => invoke("new_pairing"),
     listDevices: () => invoke("list_devices"),
     revokeDevice: (id) => invoke("revoke_device", { id }),
+    getDeck: () => invoke("get_deck"),
+    setDeck: (deck) => invoke("set_deck", { deck }),
+    testAction: (id) => invoke("test_action", { id }),
     hasBackdrop: () => invoke("has_backdrop"),
     dataDir: () => invoke("data_dir_path"),
     onStatusChanged: (cb) => listen<ServerStatus>("status-changed", (e) => cb(e.payload)),
