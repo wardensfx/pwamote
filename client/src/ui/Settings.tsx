@@ -3,6 +3,7 @@ import type { MagnifierFollow } from "../generated/MagnifierFollow";
 import type { PointerMode } from "../generated/PointerMode";
 import type { Settings } from "../generated/Settings";
 import type { RemoteController } from "../lib/remote";
+import { forceUpdate } from "../lib/update";
 
 function Segmented<T extends string>(props: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (
@@ -119,7 +120,11 @@ export function SettingsSheet(props: { remote: RemoteController; onClose: () => 
                 <button class="btn ghost small" onClick={() => r.forget()}>
                   Oublier ce PC
                 </button>
+                <button class="btn ghost small" onClick={() => void forceUpdate()}>
+                  Mettre à jour l'app
+                </button>
               </div>
+              <p class="note">Version de l'app : {__BUILD_ID__}. « Mettre à jour » recharge la dernière version sans vous déconnecter du PC.</p>
               <p class="note">Les réglages sont enregistrés sur le PC : tous vos téléphones partagent les mêmes.</p>
             </>
           )}

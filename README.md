@@ -18,6 +18,8 @@ Prérequis : Rust stable, Node 22, WebView2 (déjà présent sur Windows 11).
 ```powershell
 cd client;     npm ci; npm run build; cd ..     # la PWA, embarquée dans le serveur
 cd desktop-ui; npm ci; npm run build; cd ..     # l'interface de la fenêtre
+# Sous Windows, `scripts/build.ps1` fait tout. Penser à relancer `npm run build` dans client/ avant
+# chaque `cargo build` : la PWA est embarquée dans le binaire, sinon le téléphone reçoit l'ancienne version.
 cargo run --release -p pwamote-desktop          # l'application de bureau
 ```
 

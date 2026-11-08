@@ -18,6 +18,8 @@ const inlineTouchIcon = () => ({
 });
 
 export default defineConfig({
+  // Horodatage de compilation, affiché dans les réglages pour savoir quelle version tourne.
+  define: { __BUILD_ID__: JSON.stringify(new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC") },
   plugins: [
     solid(),
     inlineTouchIcon(),
