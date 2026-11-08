@@ -1,7 +1,9 @@
 import { Match, Show, Switch, createSignal } from "solid-js";
+import { parseScannedLink } from "../lib/identity";
 import type { RemoteController } from "../lib/remote";
 import { Keyboard } from "./Keyboard";
 import { Pad } from "./Pad";
+import { QrScanner } from "./QrScanner";
 import { SettingsSheet } from "./Settings";
 import { CenterIcon, GearIcon, KeyboardIcon, LoupeIcon } from "./icons";
 
@@ -16,11 +18,34 @@ const Mark = () => (
 );
 
 function Pairing(props: { remote: RemoteController }) {
+  const [scanning, setScanning] = createSignal(false);
+  const [bad, setBad] = createSignal(false);
+  const onText = (text: string) => {
+    const link = parseScannedLink(text, location.origin);
+    if (!link) {
+      setBad(true);
+      return setScanning(false);
+    }
+    setScanning(false);
+    if (link.kind === "here") props.remote.start(link.code);
+    else location.href = link.url;
+  };
   return (
     <div class="center">
       <Mark />
       <h1>Associez votre PC</h1>
-      <p>Lancez PwaMote sur l'ordinateur, puis scannez le QR code affiché dans sa fenêtre avec l'appareil photo du téléphone.</p>
+      <p>Lancez PwaMote sur l'ordinateur, puis scannez le QR code affiché dans sa fenêtre.</p>
+      <Show when={bad()}>
+        <p class="warn">Ce QR code n'est pas un code d'appairage PwaMote. Réessayez avec celui de la fenêtre du PC.</p>
+      </Show>
+      <div class="row">
+        <button class="btn" onClick={() => (setBad(false), setScanning(true))}>
+          Scanner le QR code
+        </button>
+      </div>
+      <Show when={scanning()}>
+        <QrScanner onText={onText} onClose={() => setScanning(false)} />
+      </Show>
     </div>
   );
 }

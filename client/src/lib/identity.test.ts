@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guessDeviceName, loadIdentity, pairingCodeFromHash, saveIdentity, wsUrl } from "./identity";
+import { guessDeviceName, loadIdentity, pairingCodeFromHash, parseScannedLink, saveIdentity, wsUrl } from "./identity";
 
 const memory = () => {
   const m = new Map<string, string>();
@@ -33,5 +33,21 @@ describe("identity", () => {
     expect(guessDeviceName("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)")).toBe("iPhone");
     expect(wsUrl({ protocol: "https:", host: "pwamote-pc.local:8443" })).toBe("wss://pwamote-pc.local:8443/ws");
     expect(wsUrl({ protocol: "http:", host: "localhost:5173" })).toBe("ws://localhost:5173/ws");
+  });
+});
+
+describe("parseScannedLink", () => {
+  const here = "https://192.168.1.20:8443";
+  it("reconnaît un lien d'appairage de cette adresse", () => {
+    expect(parseScannedLink("https://192.168.1.20:8443/#/pair/abcdefgh12345678", here)).toEqual({ kind: "here", code: "abcdefgh12345678" });
+  });
+  it("signale un lien d'une autre adresse du PC", () => {
+    const url = "https://pwamote-pc.local:8443/#/pair/abcdefgh12345678";
+    expect(parseScannedLink(url, here)).toEqual({ kind: "elsewhere", url });
+  });
+  it("refuse tout le reste", () => {
+    for (const t of ["bonjour", "javascript:alert(1)", "https://192.168.1.20:8443/", "https://x.test/#/pair/court", ""]) {
+      expect(parseScannedLink(t, here)).toBeNull();
+    }
   });
 });

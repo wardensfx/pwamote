@@ -222,3 +222,11 @@ input[type="range"]::-webkit-slider-thumb {
 .field.tap { cursor: pointer; padding: 4px 0; touch-action: manipulation; }
 .field.tap .switch { margin: -6px; padding: 6px; width: 64px; height: 44px; }
 .field.tap .switch i { inset: 6px; }
+
+/* ---------- Lecteur de QR code ---------- */
+.scanner { position: fixed; inset: 0; z-index: 30; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 16px; padding: 0 20px calc(var(--safe-b) + 24px); }
+.scanner video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.scanner .frame { position: absolute; left: 50%; top: 42%; width: min(70vw, 300px); aspect-ratio: 1; transform: translate(-50%, -50%); border: 2px solid var(--accent); border-radius: 28px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.55); }
+.scan-hint { position: relative; margin: 0; text-align: center; color: var(--ink); font-size: 15px; max-width: 32ch; }
+.scan-close { position: relative; }
+.center .warn { color: var(--bad); font-size: 14.5px; }

@@ -49,3 +49,22 @@ export function guessDeviceName(ua = navigator.userAgent): string {
 export function wsUrl(loc: Pick<Location, "protocol" | "host">): string {
   return `${loc.protocol === "https:" ? "wss" : "ws"}://${loc.host}/ws`;
 }
+
+export type ScannedLink = { kind: "here"; code: string } | { kind: "elsewhere"; url: string };
+
+/**
+ * Interprète le contenu d'un QR code scanné dans l'app. Seuls les liens d'appairage `…/#/pair/<code>`
+ * sont acceptés ; si le PC est joignable à une autre adresse que celle de cette page, il faut y aller.
+ */
+export function parseScannedLink(text: string, currentOrigin: string): ScannedLink | null {
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  const code = pairingCodeFromHash(url.hash);
+  if (!code) return null;
+  return url.origin === currentOrigin ? { kind: "here", code } : { kind: "elsewhere", url: url.href };
+}

@@ -1,10 +1,26 @@
 import { defineConfig } from "vitest/config";
 import solid from "vite-plugin-solid";
 import { VitePWA } from "vite-plugin-pwa";
+import { readFileSync } from "node:fs";
+
+/**
+ * L'icône de l'écran d'accueil iOS est téléchargée en dehors de Safari, qui ne fait pas confiance
+ * à l'autorité de certification locale : le lien HTTPS échoue et l'app n'a pas d'icône.
+ * On l'incorpore donc directement dans la page.
+ */
+const inlineTouchIcon = () => ({
+  name: "inline-touch-icon",
+  transformIndexHtml: (html: string) =>
+    html.replace(
+      '<link rel="apple-touch-icon" href="/icon-192.png" />',
+      `<link rel="apple-touch-icon" href="data:image/png;base64,${readFileSync("public/icon-192.png").toString("base64")}" />`,
+    ),
+});
 
 export default defineConfig({
   plugins: [
     solid(),
+    inlineTouchIcon(),
     VitePWA({
       registerType: "autoUpdate",
       // L'enregistrement est fait dans main.tsx, qui vérifie aussi les mises à jour à la reprise.
