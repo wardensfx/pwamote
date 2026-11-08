@@ -44,6 +44,17 @@ export function App(props: { backend: Backend }) {
   const [portDraft, setPortDraft] = createSignal<string | null>(null);
   const [tab, setTab] = createSignal<"connection" | "actions">("connection");
   const [deckDirty, setDeckDirty] = createSignal(false);
+  const [firewall, setFirewall] = createSignal<{ busy: boolean; text: string; error: boolean }>({ busy: false, text: "", error: false });
+
+  const allowFirewall = async () => {
+    setFirewall({ busy: true, text: "Windows va demander une autorisation…", error: false });
+    try {
+      await be.allowFirewall();
+      setFirewall({ busy: false, text: "C'est fait : les téléphones du réseau local peuvent joindre PwaMote.", error: false });
+    } catch (e) {
+      setFirewall({ busy: false, text: String(e), error: true });
+    }
+  };
 
   // Ne remplace l'état que s'il a vraiment changé : sinon la liste d'adresses et le QR se redessinent
   // à chaque interrogation périodique.
@@ -259,11 +270,21 @@ export function App(props: { backend: Backend }) {
                   <li>Réglages › Général › Informations › Réglages des certificats : activez la confiance pour « PwaMote Local CA ».</li>
                   <li>Scannez ensuite le QR code ci-dessus.</li>
                 </ol>
-                <p class="hint">
-                  Le téléphone ne trouve plus le PC après une recompilation ou une réinstallation ? Windows a peut-être bloqué le nouvel exécutable : autorisez PwaMote
-                  sur les réseaux privés dans Sécurité Windows › Pare-feu › Autoriser une application.
-                </p>
               </details>
+
+              <div class="firewall">
+                <p class="hint">
+                  Le téléphone ne trouve pas le PC, ou plus depuis une recompilation ? Le pare-feu Windows bloque peut-être cet exécutable.
+                </p>
+                <button class="btn ghost small" disabled={firewall().busy} onClick={allowFirewall}>
+                  {firewall().busy ? "Autorisation…" : "Autoriser dans le pare-feu"}
+                </button>
+                <Show when={firewall().text}>
+                  <p class="hint" classList={{ error: firewall().error }}>
+                    {firewall().text}
+                  </p>
+                </Show>
+              </div>
             </section>
 
             <section class="glass devices">

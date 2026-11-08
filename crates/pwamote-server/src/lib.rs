@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod bootstrap;
 pub mod config;
+pub mod firewall;
 pub mod input;
 pub mod mdns;
 pub mod net;

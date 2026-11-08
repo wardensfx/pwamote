@@ -125,6 +125,14 @@ async fn test_action(ctx: State<'_, Ctx>, id: String) -> Result<(), String> {
     ctx.supervisor.test_action(&id).await
 }
 
+/// Autorise cet exécutable dans le pare-feu Windows (demande l'élévation).
+#[tauri::command]
+async fn allow_firewall() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(pwamote_server::firewall::allow_this_executable)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn has_backdrop(ctx: State<'_, Ctx>) -> bool {
     ctx.backdrop.load(Ordering::Relaxed)
@@ -182,6 +190,7 @@ fn main() {
             get_deck,
             set_deck,
             test_action,
+            allow_firewall,
             has_backdrop,
             data_dir_path
         ])

@@ -267,3 +267,7 @@ footer { display: flex; flex-direction: column; gap: 4px; padding: 6px 6px 0; co
   background: rgba(24, 26, 32, 0.92); animation: rise 0.4s var(--spring);
 }
 @keyframes rise { from { opacity: 0; transform: translate(-50%, 12px); } }
+
+.firewall { margin-top: 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.firewall .hint { margin: 0; }
+.hint.error { color: var(--bad); }

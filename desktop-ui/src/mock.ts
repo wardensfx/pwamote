@@ -120,6 +120,7 @@ export function mockBackend(): Backend {
       if (b?.steps.some((s) => s.kind === "run")) throw new Error("programme introuvable : powershell.exe (simulation)");
     },
     hasBackdrop: async () => false,
+    allowFirewall: () => new Promise((r) => setTimeout(r, 600)),
     dataDir: async () => "C:\\Users\\Yann\\AppData\\Roaming\\PwaMote",
     onStatusChanged: async (cb) => (subs.add(cb), () => void subs.delete(cb)),
   };

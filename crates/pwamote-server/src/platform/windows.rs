@@ -242,3 +242,45 @@ pub fn shell_open(target: &str) -> Result<(), String> {
         Err(format!("Windows n'a pas pu ouvrir « {target} »"))
     }
 }
+
+/// Lance `powershell -EncodedCommand …` en administrateur (fenêtre UAC) et attend la fin.
+pub fn run_elevated_powershell(encoded: &str) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
+    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
+
+    let verb = HSTRING::from("runas");
+    let file = HSTRING::from("powershell.exe");
+    let params = HSTRING::from(format!(
+        "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {encoded}"
+    ));
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS,
+        lpVerb: PCWSTR(verb.as_ptr()),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: PCWSTR(params.as_ptr()),
+        nShow: SW_HIDE.0,
+        ..Default::default()
+    };
+    unsafe { ShellExecuteExW(&mut info) }
+        .map_err(|_| "autorisation refusée (fenêtre administrateur annulée)".to_string())?;
+    let process = info.hProcess;
+    if process.is_invalid() {
+        return Err("PowerShell n'a pas pu démarrer".into());
+    }
+    let mut code = 1u32;
+    unsafe {
+        if WaitForSingleObject(process, INFINITE) == WAIT_OBJECT_0 {
+            let _ = GetExitCodeProcess(process, &mut code);
+        }
+        let _ = CloseHandle(process);
+    }
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(format!("le réglage du pare-feu a échoué (code {code})"))
+    }
+}

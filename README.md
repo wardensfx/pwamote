@@ -41,6 +41,10 @@ Le gyroscope n'est disponible qu'en HTTPS. Le serveur crée sa propre autorité 
 
 Ajoutez ensuite la page à l'écran d'accueil (Partager › Sur l'écran d'accueil) pour l'avoir en plein écran.
 
+### Le téléphone ne trouve pas le PC
+
+Si la fenêtre indique « En ligne » mais que le téléphone n'arrive pas à se connecter, ouvrez `https://<IP du PC>:8443/healthz` dans Safari. Si la page ne se charge pas, le pare-feu Windows bloque probablement l'exécutable (fréquent après une recompilation : `target\release\pwamote-desktop.exe` est un nouveau programme pour Windows). Le bouton **Autoriser dans le pare-feu** de la fenêtre crée, après confirmation administrateur, une règle entrante TCP limitée au réseau local pour cet exécutable. Côté téléphone, Réglages › Appareil permet toujours de réessayer, de rescanner un QR code ou de recharger la dernière version de l'app.
+
 ## Développer
 
 ```bash
