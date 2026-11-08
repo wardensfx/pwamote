@@ -11,7 +11,7 @@ import { encodeMotion, encodeScroll, encodeTrackpad } from "./frames";
 import { haptic } from "./haptics";
 import { clearIdentity, guessDeviceName, loadIdentity, saveIdentity, wsUrl, type Identity } from "./identity";
 import { StickyModifiers } from "./modifiers";
-import { MotionSource, requestMotionPermission, type MotionPermission } from "./motion";
+import { MotionSource, requestMotionPermission, saveAxisMap, type MotionPermission } from "./motion";
 import { SettingsSync, type Edit } from "./settings-sync";
 
 export type Phase = "needs-pairing" | "connecting" | "ready" | "offline" | "rejected";
@@ -163,6 +163,11 @@ export class RemoteController {
     this.modsSig[1](this.modifiers.active());
   }
 
+  /** Efface `count` caractères sur le PC (sans modificateurs). */
+  backspace(count: number): void {
+    for (let i = 0; i < Math.min(count, 200); i++) this.send({ t: "key_tap", key: "backspace", modifiers: [] });
+  }
+
   text(text: string): void {
     const mods = this.modifiers.active();
     if (mods.length > 0 && text.length === 1) {
@@ -218,6 +223,12 @@ export class RemoteController {
     return permission;
   }
 
+  /** Oublie les axes mesurés du capteur : ils seront redéterminés au prochain geste. */
+  resetGyroAxes(): void {
+    this.motion?.resetCalibration();
+    saveAxisMap(null);
+  }
+
   private stopMotion(): void {
     this.motion?.stop();
     if (this.motionSig[0]() === "granted") this.motionSig[1]("off");
@@ -226,8 +237,8 @@ export class RemoteController {
 
   // ----- Réglages -----
 
-  edit(edit: Edit): void {
-    this.sync.edit(edit);
+  edit(edit: Edit, key: string | null = null): void {
+    this.sync.edit(edit, key);
     if (this.flushTimer) clearTimeout(this.flushTimer);
     // Regroupe les rafales (curseur de sensibilité) en un seul envoi.
     this.flushTimer = setTimeout(() => {

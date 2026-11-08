@@ -45,9 +45,11 @@ function Toggle(props: { label: string; checked: boolean; onChange: (v: boolean)
 export function SettingsSheet(props: { remote: RemoteController; onClose: () => void }): JSX.Element {
   const r = props.remote;
   const s = () => r.settings();
-  const set = (f: (s: Settings) => Settings) => r.edit(f);
-  const pointer = (p: Partial<Settings["pointer"]>) => set((x) => ({ ...x, pointer: { ...x.pointer, ...p } }));
-  const magnifier = (p: Partial<Settings["magnifier"]>) => set((x) => ({ ...x, magnifier: { ...x.magnifier, ...p } }));
+  const set = (f: (s: Settings) => Settings, key: string) => r.edit(f, key);
+  const pointer = (p: Partial<Settings["pointer"]>) =>
+    set((x) => ({ ...x, pointer: { ...x.pointer, ...p } }), `pointer.${Object.keys(p).join(",")}`);
+  const magnifier = (p: Partial<Settings["magnifier"]>) =>
+    set((x) => ({ ...x, magnifier: { ...x.magnifier, ...p } }), `magnifier.${Object.keys(p).join(",")}`);
 
   return (
     <>
@@ -75,7 +77,8 @@ export function SettingsSheet(props: { remote: RemoteController; onClose: () => 
               <Slider label="Accélération" min={0} max={1} step={0.05} value={cfg().pointer.acceleration} format={(v) => `${Math.round(v * 100)} %`} onChange={(acceleration) => pointer({ acceleration })} />
               <Slider label="Lissage" min={0} max={1} step={0.05} value={cfg().pointer.smoothing} format={(v) => `${Math.round(v * 100)} %`} onChange={(smoothing) => pointer({ smoothing })} />
               <Slider label="Zone morte" min={0} max={6} step={0.1} value={cfg().pointer.deadzone_dps} format={(v) => `${v.toFixed(1)} °/s`} onChange={(deadzone_dps) => pointer({ deadzone_dps })} />
-              <Slider label="Vitesse du trackpad" min={0.4} max={4} step={0.1} value={cfg().pointer.trackpad_speed} format={(v) => `×${v.toFixed(1)}`} onChange={(trackpad_speed) => pointer({ trackpad_speed })} />
+              <Slider label="Vitesse du trackpad" min={0.5} max={12} step={0.1} value={cfg().pointer.trackpad_speed} format={(v) => `×${v.toFixed(1)}`} onChange={(trackpad_speed) => pointer({ trackpad_speed })} />
+              <Toggle label="Inverser gauche / droite" checked={cfg().pointer.invert_x} onChange={(invert_x) => pointer({ invert_x })} />
               <Toggle label="Inverser l'axe vertical" checked={cfg().pointer.invert_y} onChange={(invert_y) => pointer({ invert_y })} />
               <Toggle label="Défilement naturel" checked={cfg().pointer.natural_scroll} onChange={(natural_scroll) => pointer({ natural_scroll })} />
 
@@ -96,13 +99,16 @@ export function SettingsSheet(props: { remote: RemoteController; onClose: () => 
               </div>
 
               <h3>Clavier et retour</h3>
-              <Toggle label="Modificateurs collants" checked={cfg().keyboard.sticky_modifiers} onChange={(sticky_modifiers) => set((x) => ({ ...x, keyboard: { sticky_modifiers } }))} />
-              <Toggle label="Retour haptique" checked={cfg().feedback.haptics} onChange={(haptics) => set((x) => ({ ...x, feedback: { haptics } }))} />
+              <Toggle label="Modificateurs collants" checked={cfg().keyboard.sticky_modifiers} onChange={(sticky_modifiers) => set((x) => ({ ...x, keyboard: { sticky_modifiers } }), "keyboard.sticky")} />
+              <Toggle label="Retour haptique" checked={cfg().feedback.haptics} onChange={(haptics) => set((x) => ({ ...x, feedback: { haptics } }), "feedback.haptics")} />
 
               <h3>Appareil</h3>
               <div class="row">
                 <button class="btn ghost small" onClick={() => r.recenter()}>
                   Recentrer le curseur
+                </button>
+                <button class="btn ghost small" onClick={() => r.resetGyroAxes()}>
+                  Recalibrer le gyroscope
                 </button>
                 <button class="btn ghost small" onClick={() => r.forget()}>
                   Oublier ce PC

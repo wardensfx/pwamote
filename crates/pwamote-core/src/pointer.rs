@@ -244,7 +244,7 @@ impl PointerEngine {
 
         // Tourner vers la gauche (lacet positif) envoie le curseur à gauche ;
         // lever le bout du téléphone (tangage positif) l'envoie vers le haut.
-        let dx = -yaw * gain;
+        let dx = -yaw * gain * if cfg.invert_x { -1.0 } else { 1.0 };
         let dy = -pitch * gain * if cfg.invert_y { -1.0 } else { 1.0 };
         let (dx, dy) = self.pixels.push(dx, dy);
         PixelDelta { dx, dy }
@@ -252,7 +252,8 @@ impl PointerEngine {
 
     pub fn on_trackpad(&mut self, dx: f32, dy: f32, cfg: &PointerSettings) -> PixelDelta {
         let distance = dx.hypot(dy);
-        let accel = 1.0 + 0.6 * cfg.acceleration * (distance / 8.0).min(3.0);
+        // Distance par événement : un geste rapide (≈ 16 px à 60 Hz) multiplie jusqu'à ×(1 + 4·accélération).
+        let accel = 1.0 + cfg.acceleration * (distance / 4.0).min(4.0);
         let k = cfg.trackpad_speed * accel;
         let (dx, dy) = self.pixels.push(dx * k, dy * k);
         PixelDelta { dx, dy }
@@ -488,6 +489,40 @@ mod tests {
             sum += e.on_trackpad(0.25, 0.0, &c).dx;
         }
         assert_eq!(sum, 2);
+    }
+
+    #[test]
+    fn invert_x_flips_horizontal_motion_only() {
+        let mut e = PointerEngine::new();
+        let c = PointerSettings {
+            invert_x: true,
+            ..cfg()
+        };
+        let (dx, dy) = run(&mut e, [0.0, 0.0, 40.0], FLAT, 30, &c);
+        assert!(dx > 100, "dx = {dx}");
+        assert_eq!(dy, 0);
+    }
+
+    #[test]
+    fn a_fast_swipe_at_default_settings_crosses_most_of_a_full_hd_screen() {
+        // Pad d'environ 360 px de large, balayé en 20 événements : de bord à bord.
+        let c = PointerSettings::default();
+        let mut e = PointerEngine::new();
+        let total: i32 = (0..20).map(|_| e.on_trackpad(16.0, 0.0, &c).dx).sum();
+        assert!(total > 1500, "total = {total}");
+    }
+
+    #[test]
+    fn slow_trackpad_movement_stays_precise() {
+        let c = PointerSettings {
+            acceleration: 0.45,
+            trackpad_speed: 3.0,
+            ..PointerSettings::default()
+        };
+        let mut e = PointerEngine::new();
+        let total: i32 = (0..20).map(|_| e.on_trackpad(0.5, 0.0, &c).dx).sum();
+        // 0,5 px × 3 de vitesse × ~1,06 d’accélération × 20 événements ≈ 31 : quasi linéaire.
+        assert!((28..=34).contains(&total), "total = {total}");
     }
 
     #[test]

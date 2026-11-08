@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MotionSource, normalizeSample, rotateForOrientation } from "./motion";
+import { IDENTITY_MAP } from "./axis-calibration";
+import { MotionSource, defaultAxisMap, normalizeSample, rotateForOrientation } from "./motion";
 
 describe("normalizeSample", () => {
   it("convertit le repère d'iOS vers le repère W3C attendu par le serveur", () => {
@@ -44,7 +45,12 @@ describe("MotionSource", () => {
   it("calcule dt à partir de l'horloge et ignore le premier événement", () => {
     const got: number[] = [];
     let now = 1000;
-    const src = new MotionSource((s) => got.push(s.dt), { now: () => now, invertAccel: false, angle: () => 0 });
+    const src = new MotionSource((s) => got.push(s.dt), {
+      now: () => now,
+      invertAccel: false,
+      angle: () => 0,
+      initialMap: IDENTITY_MAP,
+    });
     const ev = { rotationRate: { alpha: 0, beta: 0, gamma: 0 }, accelerationIncludingGravity: { x: 0, y: 0, z: 9.81 } };
     src.handle(ev);
     now += 16;
@@ -52,5 +58,28 @@ describe("MotionSource", () => {
     now += 17;
     src.handle(ev);
     expect(got.map((d) => Math.round(d * 1000))).toEqual([16, 17]);
+  });
+});
+
+describe("affectation des axes", () => {
+  it("part de l'ordre Core Motion sur iOS et de l'ordre W3C ailleurs", () => {
+    expect(defaultAxisMap(true).perm).toEqual([0, 1, 2]);
+    expect(defaultAxisMap(false).perm).toEqual([1, 2, 0]);
+  });
+
+  it("applique l'affectation choisie aux vitesses de rotation", () => {
+    const got: number[][] = [];
+    let now = 0;
+    const src = new MotionSource((s) => got.push(s.gyro), {
+      now: () => now,
+      invertAccel: false,
+      angle: () => 0,
+      initialMap: IDENTITY_MAP,
+    });
+    const ev = { rotationRate: { alpha: 1, beta: 2, gamma: 3 }, accelerationIncludingGravity: { x: 0, y: 0, z: 9.81 } };
+    src.handle(ev);
+    now += 16;
+    src.handle(ev);
+    expect(got[0]).toEqual([1, 2, 3]);
   });
 });

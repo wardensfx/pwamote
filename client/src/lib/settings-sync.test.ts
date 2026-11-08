@@ -3,7 +3,7 @@ import type { Settings } from "../generated/Settings";
 import { SettingsSync } from "./settings-sync";
 
 const base = (): Settings => ({
-  pointer: { mode: "air_hold", sensitivity: 38, acceleration: 0.45, smoothing: 0.35, deadzone_dps: 1.6, invert_y: false, trackpad_speed: 1.6, scroll_speed: 1, natural_scroll: true },
+  pointer: { mode: "air_hold", sensitivity: 38, acceleration: 0.45, smoothing: 0.35, deadzone_dps: 1.6, invert_y: false, invert_x: false, trackpad_speed: 1.6, scroll_speed: 1, natural_scroll: true },
   magnifier: { zoom: 2.5, follow: "smart", animation_ms: 220, caret_hold_ms: 1500 },
   keyboard: { sticky_modifiers: true },
   feedback: { haptics: true },
@@ -82,5 +82,63 @@ describe("SettingsSync", () => {
     sync.flush();
     sync.onDisconnect();
     expect(sync.flush()).not.toBeNull();
+  });
+
+  describe("glisser un curseur (régression : la valeur revenait à la première)", () => {
+    const sens = (v: number) => (s: Settings): Settings => ({ ...s, pointer: { ...s.pointer, sensitivity: v } });
+
+    /** Un serveur minimal : accepte une mise à jour, incrémente la révision, répond deux fois (réponse + diffusion). */
+    function fakeServer(sync: SettingsSync) {
+      let rev = 0;
+      let state = base();
+      const sent: number[] = [];
+      const deliver = (msg: { base_rev: number; settings: Settings } | null) => {
+        let next = msg;
+        while (next) {
+          sent.push(next.settings.pointer.sensitivity);
+          if (JSON.stringify(next.settings) !== JSON.stringify(state)) {
+            state = next.settings;
+            rev += 1;
+          }
+          // réponse directe puis diffusion
+          const a = sync.onServer({ rev, settings: state });
+          const b = sync.onServer({ rev, settings: state });
+          next = a ?? b;
+        }
+      };
+      return { deliver, sent, get rev() { return rev; } };
+    }
+
+    it("la dernière valeur gagne, sans revenir en arrière", () => {
+      const { sync } = setup();
+      const server = fakeServer(sync);
+      for (let v = 22; v <= 77; v += 5) sync.edit(sens(v), "pointer.sensitivity");
+      server.deliver(sync.flush());
+      expect(sync.current!.pointer.sensitivity).toBe(77);
+      expect(sync.pending).toBe(false);
+      expect(server.sent).toEqual([77]);
+    });
+
+    it("des modifications arrivées pendant un envoi sont envoyées ensuite, dans l'ordre", () => {
+      const { sync } = setup();
+      const server = fakeServer(sync);
+      sync.edit(sens(30), "pointer.sensitivity");
+      const first = sync.flush();
+      sync.edit(sens(40), "pointer.sensitivity");
+      sync.edit(sens(50), "pointer.sensitivity");
+      server.deliver(first);
+      expect(server.sent).toEqual([30, 50]);
+      expect(sync.current!.pointer.sensitivity).toBe(50);
+    });
+
+    it("sans clé, une modification confirmée n'efface pas ce qui la suit", () => {
+      const { sync } = setup();
+      const server = fakeServer(sync);
+      sync.edit(sens(30));
+      const first = sync.flush();
+      sync.edit(sens(60));
+      server.deliver(first);
+      expect(sync.current!.pointer.sensitivity).toBe(60);
+    });
   });
 });

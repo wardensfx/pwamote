@@ -12,14 +12,14 @@ export type Edit = (s: Settings) => Settings;
  */
 export class SettingsSync {
   private server: VersionedSettings | null = null;
-  private edits: Edit[] = [];
+  private edits: { edit: Edit; key: string | null }[] = [];
   private inFlight = false;
 
   constructor(private readonly onChange: (s: Settings) => void) {}
 
   /** Réglages à afficher : serveur + modifications en attente. */
   get current(): Settings | null {
-    return this.server ? this.edits.reduce((s, e) => e(s), this.server.settings) : null;
+    return this.server ? this.edits.reduce((s, e) => e.edit(s), this.server.settings) : null;
   }
 
   get rev(): number | null {
@@ -30,8 +30,14 @@ export class SettingsSync {
     return this.edits.length > 0;
   }
 
-  edit(edit: Edit): void {
-    this.edits.push(edit);
+  /**
+   * Enregistre une modification locale. Avec une `key`, elle remplace toute
+   * modification précédente de la même clé : glisser un curseur ne garde que
+   * la dernière valeur, jamais l'historique.
+   */
+  edit(edit: Edit, key: string | null = null): void {
+    if (key !== null) this.edits = this.edits.filter((e) => e.key !== key);
+    this.edits.push({ edit, key });
     this.emit();
   }
 
@@ -45,10 +51,13 @@ export class SettingsSync {
   /** Le serveur a envoyé (ou confirmé) un état. Renvoie une nouvelle mise à jour si nécessaire. */
   onServer(v: VersionedSettings): { base_rev: number; settings: Settings } | null {
     if (this.server && v.rev < this.server.rev) return null;
+    // Même révision, rien en vol : c'est l'écho d'une diffusion déjà traitée.
+    if (this.server && v.rev === this.server.rev && !this.inFlight) return null;
     this.server = v;
     this.inFlight = false;
     // Une modification déjà reflétée par le serveur n'a plus besoin d'être rejouée.
-    this.edits = this.edits.filter((e) => !same(e(v.settings), v.settings));
+    // On ne retire que celle-là : les modifications qui la suivent restent en attente.
+    this.edits = this.edits.filter((e) => !same(e.edit(v.settings), v.settings));
     this.emit();
     return this.flush();
   }

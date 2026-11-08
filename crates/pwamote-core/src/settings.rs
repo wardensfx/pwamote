@@ -45,6 +45,8 @@ pub struct PointerSettings {
     /// Vitesse angulaire (°/s) en dessous de laquelle le tremblement est absorbé.
     pub deadzone_dps: f32,
     pub invert_y: bool,
+    /// Inverse le sens gauche/droite (utile si le capteur du navigateur a ses axes inversés).
+    pub invert_x: bool,
     /// Multiplicateur du mode trackpad.
     pub trackpad_speed: f32,
     pub scroll_speed: f32,
@@ -60,7 +62,8 @@ impl Default for PointerSettings {
             smoothing: 0.35,
             deadzone_dps: 1.6,
             invert_y: false,
-            trackpad_speed: 1.6,
+            invert_x: false,
+            trackpad_speed: 3.0,
             scroll_speed: 1.0,
             natural_scroll: true,
         }
@@ -148,7 +151,7 @@ impl Settings {
         p.acceleration = clamp_finite(p.acceleration, 0.0, 1.0, d.pointer.acceleration);
         p.smoothing = clamp_finite(p.smoothing, 0.0, 1.0, d.pointer.smoothing);
         p.deadzone_dps = clamp_finite(p.deadzone_dps, 0.0, 10.0, d.pointer.deadzone_dps);
-        p.trackpad_speed = clamp_finite(p.trackpad_speed, 0.2, 6.0, d.pointer.trackpad_speed);
+        p.trackpad_speed = clamp_finite(p.trackpad_speed, 0.2, 12.0, d.pointer.trackpad_speed);
         p.scroll_speed = clamp_finite(p.scroll_speed, 0.1, 6.0, d.pointer.scroll_speed);
         let m = &mut self.magnifier;
         m.zoom = clamp_finite(m.zoom, 1.25, 8.0, d.magnifier.zoom);
@@ -244,6 +247,13 @@ mod tests {
         assert_eq!(s.pointer.sensitivity, 200.0);
         assert_eq!(s.pointer.smoothing, 0.0);
         assert_eq!(s.magnifier.zoom, 1.25);
+    }
+
+    #[test]
+    fn trackpad_speed_can_go_high_enough_to_cross_a_screen_in_one_swipe() {
+        let mut s = Settings::default();
+        s.pointer.trackpad_speed = 12.0;
+        assert_eq!(s.sanitized().pointer.trackpad_speed, 12.0);
     }
 
     #[test]

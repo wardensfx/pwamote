@@ -9,7 +9,9 @@ use pwamote_core::protocol::MagnifierAction;
 use pwamote_core::settings::MagnifierSettings;
 use windows::Win32::Foundation::{POINT, RECT};
 use windows::Win32::Graphics::Gdi::ClientToScreen;
-use windows::Win32::UI::Magnification::{MagInitialize, MagSetFullscreenTransform, MagUninitialize};
+use windows::Win32::UI::Magnification::{
+    MagInitialize, MagSetFullscreenTransform, MagUninitialize,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetGUIThreadInfo, GetSystemMetrics, GUITHREADINFO, SM_CXSCREEN, SM_CYSCREEN,
 };
@@ -27,7 +29,12 @@ pub struct WindowsMagnifier {
 
 fn primary_screen() -> Rect {
     unsafe {
-        Rect { x: 0.0, y: 0.0, w: GetSystemMetrics(SM_CXSCREEN) as f32, h: GetSystemMetrics(SM_CYSCREEN) as f32 }
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: GetSystemMetrics(SM_CXSCREEN) as f32,
+            h: GetSystemMetrics(SM_CYSCREEN) as f32,
+        }
     }
 }
 
@@ -36,7 +43,10 @@ fn cursor() -> Point {
     unsafe {
         let _ = GetCursorPos(&mut p);
     }
-    Point { x: p.x as f32, y: p.y as f32 }
+    Point {
+        x: p.x as f32,
+        y: p.y as f32,
+    }
 }
 
 /// Position du caret de saisie de la fenêtre active, si elle en expose un.
@@ -44,12 +54,20 @@ fn cursor() -> Point {
 /// dessinent leur propre caret (navigateurs, Electron) retombent sur le curseur.
 fn caret() -> Option<Rect> {
     unsafe {
-        let mut info = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+        let mut info = GUITHREADINFO {
+            cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
         GetGUIThreadInfo(0, &mut info).ok()?;
         if info.hwndCaret.0.is_null() {
             return None;
         }
-        let RECT { left, top, right, bottom } = info.rcCaret;
+        let RECT {
+            left,
+            top,
+            right,
+            bottom,
+        } = info.rcCaret;
         let mut origin = POINT { x: left, y: top };
         if !ClientToScreen(info.hwndCaret, &mut origin).as_bool() {
             return None;
@@ -107,7 +125,8 @@ fn run(shared: Arc<Mutex<Shared>>) {
             Some(t) => {
                 showing = true;
                 unsafe {
-                    let _ = MagSetFullscreenTransform(t.zoom, t.x.round() as i32, t.y.round() as i32);
+                    let _ =
+                        MagSetFullscreenTransform(t.zoom, t.x.round() as i32, t.y.round() as i32);
                 }
             }
             None if showing => {
@@ -129,7 +148,10 @@ impl MagnifierSink for WindowsMagnifier {
     fn command(&self, action: MagnifierAction) -> MagnifierStatus {
         let mut s = self.shared.lock().expect("magnifier lock");
         apply_action(&mut s.controller, action);
-        MagnifierStatus { active: s.controller.is_active(), zoom: s.controller.target_zoom() }
+        MagnifierStatus {
+            active: s.controller.is_active(),
+            zoom: s.controller.target_zoom(),
+        }
     }
 
     fn configure(&self, settings: &MagnifierSettings) {

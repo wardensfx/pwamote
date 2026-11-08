@@ -19,6 +19,10 @@ smoothing: number,
  */
 deadzone_dps: number, invert_y: boolean, 
 /**
+ * Inverse le sens gauche/droite (utile si le capteur du navigateur a ses axes inversés).
+ */
+invert_x: boolean, 
+/**
  * Multiplicateur du mode trackpad.
  */
 trackpad_speed: number, scroll_speed: number, natural_scroll: boolean, };
