@@ -2,9 +2,11 @@
 
 use pwamote_core::pointer::WheelDelta;
 use pwamote_core::protocol::{Key, Modifier, MouseButton};
+use windows::core::HSTRING;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, SetCursorPos, SM_CXSCREEN, SM_CYSCREEN,
+    GetSystemMetrics, SetCursorPos, SM_CXSCREEN, SM_CYSCREEN, SW_SHOWNORMAL,
 };
 
 use crate::input::InputSink;
@@ -83,6 +85,9 @@ fn is_extended(vk: VIRTUAL_KEY) -> bool {
 }
 
 fn key_input(vk: VIRTUAL_KEY, down: bool) -> INPUT {
+    // Le code de balayage en plus du code virtuel : les navigateurs en déduisent `KeyboardEvent.code`,
+    // que certaines extensions (vitesse des vidéos…) lisent pour reconnaître une touche.
+    let scan = unsafe { MapVirtualKeyW(u32::from(vk.0), MAPVK_VK_TO_VSC) } as u16;
     let mut flags = KEYBD_EVENT_FLAGS(0);
     if !down {
         flags |= KEYEVENTF_KEYUP;
@@ -95,7 +100,7 @@ fn key_input(vk: VIRTUAL_KEY, down: bool) -> INPUT {
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: vk,
-                wScan: 0,
+                wScan: scan,
                 dwFlags: flags,
                 time: 0,
                 dwExtraInfo: 0,
@@ -215,5 +220,25 @@ impl InputSink for WindowsInput {
             let (w, h) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
             let _ = SetCursorPos(w / 2, h / 2);
         }
+    }
+}
+
+/// Ouvre une adresse, un fichier ou un dossier avec l'application associée.
+pub fn shell_open(target: &str) -> Result<(), String> {
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            &HSTRING::from("open"),
+            &HSTRING::from(target),
+            None,
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+    // Par convention historique, une valeur supérieure à 32 signifie le succès.
+    if result.0 as isize > 32 {
+        Ok(())
+    } else {
+        Err(format!("Windows n'a pas pu ouvrir « {target} »"))
     }
 }

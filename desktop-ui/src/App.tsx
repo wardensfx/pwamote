@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
+import { DeckEditor } from "./DeckEditor";
 import { countdown, isValidHost, phonesLabel, relativeTime, selectedAddress } from "./format";
 import type { AppConfig, Backend, DeviceView, PairingInfo, ServerStatus } from "./ipc";
 
@@ -41,6 +42,8 @@ export function App(props: { backend: Backend }) {
   const [customHost, setCustomHost] = createSignal("");
   const [customMode, setCustomMode] = createSignal(false);
   const [portDraft, setPortDraft] = createSignal<string | null>(null);
+  const [tab, setTab] = createSignal<"connection" | "actions">("connection");
+  const [deckDirty, setDeckDirty] = createSignal(false);
 
   // Ne remplace l'état que s'il a vraiment changé : sinon la liste d'adresses et le QR se redessinent
   // à chaque interrogation périodique.
@@ -150,6 +153,24 @@ export function App(props: { backend: Backend }) {
               </div>
             </header>
 
+            <nav class="tabs" role="tablist">
+              <button role="tab" aria-selected={tab() === "connection"} onClick={() => setTab("connection")}>
+                Connexion
+              </button>
+              <button role="tab" aria-selected={tab() === "actions"} onClick={() => setTab("actions")}>
+                Actions
+                <Show when={deckDirty()}>
+                  <i class="tab-dot" aria-label="modifications non enregistrées" />
+                </Show>
+              </button>
+            </nav>
+
+            {/* Les deux onglets restent montés : un brouillon d'actions survit à un détour par la connexion. */}
+            <div class="tab-panel" hidden={tab() !== "actions"}>
+              <DeckEditor backend={be} onDirty={setDeckDirty} />
+            </div>
+
+            <div class="tab-panel" hidden={tab() !== "connection"}>
             <section class="glass status" data-state={s().error ? "error" : s().running ? "ok" : "off"}>
               <span class="dot" />
               <div class="status-text">
@@ -283,6 +304,8 @@ export function App(props: { backend: Backend }) {
                 />
               </Row>
             </section>
+
+            </div>
 
             <footer>
               <span>Données : <span class="mono">{dataDir()}</span></span>

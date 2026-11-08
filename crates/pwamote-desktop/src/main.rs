@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use pwamote_server::bootstrap;
 use pwamote_server::config::AppConfig;
+use pwamote_server::pwamote_core::actions::Deck;
 use pwamote_server::supervisor::{DeviceView, PairingInfo, ServerStatus, Supervisor};
 use tauri::menu::{
     CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem,
@@ -110,6 +111,21 @@ fn revoke_device(ctx: State<'_, Ctx>, id: String) -> bool {
 }
 
 #[tauri::command]
+fn get_deck(ctx: State<'_, Ctx>) -> Deck {
+    ctx.supervisor.deck()
+}
+
+#[tauri::command]
+fn set_deck(ctx: State<'_, Ctx>, deck: Deck) -> Deck {
+    ctx.supervisor.set_deck(deck)
+}
+
+#[tauri::command]
+async fn test_action(ctx: State<'_, Ctx>, id: String) -> Result<(), String> {
+    ctx.supervisor.test_action(&id).await
+}
+
+#[tauri::command]
 fn has_backdrop(ctx: State<'_, Ctx>) -> bool {
     ctx.backdrop.load(Ordering::Relaxed)
 }
@@ -163,6 +179,9 @@ fn main() {
             new_pairing,
             list_devices,
             revoke_device,
+            get_deck,
+            set_deck,
+            test_action,
             has_backdrop,
             data_dir_path
         ])

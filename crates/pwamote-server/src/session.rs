@@ -11,6 +11,7 @@ use pwamote_core::protocol::{
     PROTOCOL_VERSION,
 };
 
+use crate::actions::ActionJob;
 use crate::state::AppState;
 
 #[derive(Debug, Default, PartialEq)]
@@ -18,13 +19,15 @@ pub struct Outcome {
     pub replies: Vec<ServerMessage>,
     /// La connexion doit être fermée après l'envoi des réponses.
     pub close: bool,
+    /// Actions validées, à exécuter hors de la boucle du WebSocket.
+    pub jobs: Vec<ActionJob>,
 }
 
 impl Outcome {
     fn reply(msg: ServerMessage) -> Self {
         Self {
             replies: vec![msg],
-            close: false,
+            ..Self::default()
         }
     }
 
@@ -39,6 +42,7 @@ impl Outcome {
                 message: message.into(),
             }],
             close: true,
+            jobs: vec![],
         }
     }
 }
@@ -78,6 +82,12 @@ impl Session {
         }
     }
 
+    fn deck(&self) -> ServerMessage {
+        ServerMessage::Deck {
+            deck: self.state.deck_view(),
+        }
+    }
+
     pub fn on_text(&mut self, raw: &str) -> Outcome {
         let msg: ClientMessage = match serde_json::from_str(raw) {
             Ok(m) => m,
@@ -114,7 +124,8 @@ impl Session {
             ClientMessage::Hello { token, .. } => match self.state.authenticate(&token) {
                 Some(device) => {
                     tracing::info!(device = %device.name, "téléphone connecté");
-                    Outcome::reply(self.welcome(device.id))
+                    let welcome = self.welcome(device.id);
+                    Outcome { replies: vec![welcome, self.deck()], ..Outcome::default() }
                 }
                 None => Outcome::fatal(ErrorCode::Unauthorized, "appareil inconnu, appairez-le de nouveau"),
             },
@@ -123,7 +134,7 @@ impl Session {
                     tracing::info!(device = %device_name, "nouvel appareil appairé");
                     let paired = ServerMessage::Paired { device_id: device_id.clone(), token };
                     let welcome = self.welcome(device_id);
-                    Outcome { replies: vec![paired, welcome], close: false }
+                    Outcome { replies: vec![paired, welcome, self.deck()], ..Outcome::default() }
                 }
                 Err(e) => Outcome::fatal(ErrorCode::PairingCodeInvalid, e.to_string()),
             },
@@ -213,8 +224,22 @@ impl Session {
                                 settings: conflict.current,
                             },
                         ],
-                        close: false,
+                        ..Outcome::default()
                     },
+                };
+            }
+            ClientMessage::RunAction { id, values } => {
+                // Seuls les boutons définis sur le PC existent ; les valeurs sont validées ici.
+                return match self.state.plan_action(&id, &values) {
+                    Ok(job) => Outcome {
+                        jobs: vec![job],
+                        ..Outcome::default()
+                    },
+                    Err(e) => Outcome::reply(ServerMessage::ActionResult {
+                        id,
+                        ok: false,
+                        message: Some(e.to_string()),
+                    }),
                 };
             }
         }
@@ -606,6 +631,67 @@ mod tests {
         let out = s.on_text("{]");
         assert!(!out.close);
         s.on_binary(&[0xff, 1, 2]);
+    }
+
+    #[test]
+    fn the_deck_follows_the_welcome() {
+        let f = fixture();
+        let mut s = Session::new(f.state.clone());
+        let code = f.state.new_pairing_code();
+        let out = send(
+            &mut s,
+            json!({"t": "pair", "code": code, "device_name": "iPhone", "protocol": 1}),
+        );
+        match &out.replies[2] {
+            ServerMessage::Deck { deck } => assert_eq!(deck, &f.state.deck_view()),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_action_produces_a_job_for_a_known_button() {
+        let (f, mut s) = paired_session();
+        let out = send(&mut s, json!({"t": "run_action", "id": "slower"}));
+        assert!(out.replies.is_empty());
+        assert_eq!(out.jobs.len(), 1);
+        assert_eq!(out.jobs[0].id, "slower");
+        // Rien n'est tapé tant que le job n'est pas exécuté.
+        assert!(f.input.take().is_empty());
+        f.state.run_job(&out.jobs[0]).unwrap();
+        assert_eq!(
+            f.input.take(),
+            vec![
+                Event::Key(Key::Char('s'), true),
+                Event::Key(Key::Char('s'), false)
+            ]
+        );
+    }
+
+    #[test]
+    fn run_action_refuses_unknown_buttons_and_bad_values() {
+        let (f, mut s) = paired_session();
+        let out = send(&mut s, json!({"t": "run_action", "id": "format_c"}));
+        assert!(out.jobs.is_empty());
+        assert!(matches!(
+            &out.replies[0],
+            ServerMessage::ActionResult { ok: false, id, .. } if id == "format_c"
+        ));
+        let out = send(
+            &mut s,
+            json!({"t": "run_action", "id": "youtube", "values": {"program": "cmd.exe"}}),
+        );
+        assert!(out.jobs.is_empty());
+        assert!(!out.close);
+        assert!(f.launcher.take().is_empty());
+    }
+
+    #[test]
+    fn run_action_before_authentication_closes_the_connection() {
+        let f = fixture();
+        let mut s = Session::new(f.state.clone());
+        let out = send(&mut s, json!({"t": "run_action", "id": "slower"}));
+        assert!(out.close);
+        assert!(out.jobs.is_empty());
     }
 
     #[test]

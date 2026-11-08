@@ -3,12 +3,14 @@
 use std::sync::{Arc, Mutex};
 
 use futures_util::{SinkExt, StreamExt};
+use pwamote_core::actions::{ActionButton, ActionStep, ButtonColor, Deck};
 use pwamote_core::pairing::PairingRegistry;
 use pwamote_core::pointer::WheelDelta;
 use pwamote_core::protocol::{Key, MagnifierAction, Modifier, MouseButton};
 use pwamote_core::settings::{MagnifierSettings, Settings, VersionedSettings};
+use pwamote_server::actions::Launcher;
 use pwamote_server::input::{InputSink, LogMagnifier};
-use pwamote_server::state::{AppState, MemoryPersist};
+use pwamote_server::state::{AppState, MemoryPersist, Sinks};
 use pwamote_server::tls::Pki;
 use pwamote_server::web::{router, WebState};
 use serde_json::{json, Value};
@@ -42,6 +44,20 @@ impl InputSink for Recorder {
     fn recenter(&self) {}
 }
 
+impl Launcher for Recorder {
+    fn run(&self, program: &str, args: &[String], _: Option<&str>, _: bool) -> Result<(), String> {
+        self.0
+            .lock()
+            .unwrap()
+            .push(format!("run {program} {}", args.join(" ")));
+        Ok(())
+    }
+    fn open(&self, target: &str) -> Result<(), String> {
+        self.0.lock().unwrap().push(format!("open {target}"));
+        Ok(())
+    }
+}
+
 async fn boot() -> (String, Arc<AppState>, Arc<Recorder>) {
     let rec = Arc::new(Recorder::default());
     let app = AppState::new(
@@ -50,9 +66,13 @@ async fn boot() -> (String, Arc<AppState>, Arc<Recorder>) {
             settings: Settings::default(),
         },
         PairingRegistry::default(),
+        Deck::example(),
         Arc::new(MemoryPersist::default()),
-        rec.clone(),
-        Arc::new(LogMagnifier::new(&MagnifierSettings::default())),
+        Sinks {
+            input: rec.clone(),
+            magnifier: Arc::new(LogMagnifier::new(&MagnifierSettings::default())),
+            launcher: rec.clone(),
+        },
         "Test PC".into(),
     );
     let pki = Arc::new(Pki::generate().unwrap());
@@ -97,6 +117,8 @@ async fn pair(url: &str, app: &AppState) -> (Ws, String) {
     assert_eq!(paired["t"], "paired");
     let welcome = recv_json(&mut ws).await;
     assert_eq!(welcome["t"], "welcome");
+    let deck = recv_json(&mut ws).await;
+    assert_eq!(deck["t"], "deck");
     (ws, paired["token"].as_str().unwrap().to_string())
 }
 
@@ -283,4 +305,57 @@ async fn revoking_a_device_cuts_its_live_session_and_updates_the_counter() {
     }
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     assert_eq!(app.connected_count(), 0);
+}
+
+#[tokio::test]
+async fn actions_run_on_the_pc_and_report_back() {
+    let (url, app, rec) = boot().await;
+    let (mut ws, _) = pair(&url, &app).await;
+    ws.send(Message::text(
+        json!({"t":"run_action","id":"youtube","values":{"recherche":"lo-fi & café"}}).to_string(),
+    ))
+    .await
+    .unwrap();
+    let done = recv_json(&mut ws).await;
+    assert_eq!(done["t"], "action_result");
+    assert_eq!(
+        (done["id"].as_str(), done["ok"].as_bool()),
+        (Some("youtube"), Some(true))
+    );
+    assert!(rec.0.lock().unwrap().contains(
+        &"open https://www.youtube.com/results?search_query=lo-fi%20%26%20caf%C3%A9".to_string()
+    ));
+
+    ws.send(Message::text(
+        json!({"t":"run_action","id":"nope"}).to_string(),
+    ))
+    .await
+    .unwrap();
+    let refused = recv_json(&mut ws).await;
+    assert_eq!(refused["ok"], false);
+}
+
+#[tokio::test]
+async fn deck_edits_on_the_pc_reach_connected_phones_without_the_steps() {
+    let (url, app, _rec) = boot().await;
+    let (mut ws, _) = pair(&url, &app).await;
+    let mut deck = app.deck();
+    deck.pages[0].cells[0] = Some(ActionButton {
+        id: "secret".into(),
+        label: "Script".into(),
+        icon: "⚙".into(),
+        color: ButtonColor::Violet,
+        inputs: vec![],
+        steps: vec![ActionStep::Run {
+            program: "C:\\outils\\secret.exe".into(),
+            args: vec![],
+            cwd: String::new(),
+            hidden: true,
+        }],
+    });
+    app.set_deck(deck);
+    let msg = recv_json(&mut ws).await;
+    assert_eq!(msg["t"], "deck");
+    assert_eq!(msg["deck"]["pages"][0]["cells"][0]["label"], "Script");
+    assert!(!msg.to_string().contains("secret.exe"));
 }

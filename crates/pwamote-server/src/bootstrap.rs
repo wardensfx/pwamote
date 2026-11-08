@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::config::AppConfig;
 use crate::input::{InputSink, MagnifierSink};
 use crate::net;
-use crate::state::{AppState, JsonFiles, Persist};
+use crate::state::{AppState, JsonFiles, Persist, Sinks};
 use crate::supervisor::{IpProvider, Supervisor};
 use crate::tls::Pki;
 
@@ -57,6 +57,7 @@ pub fn open(dir: PathBuf) -> Result<Opened, Box<dyn std::error::Error + Send + S
     let settings = files.load_settings();
     let registry = files.load_devices();
     let config: AppConfig = files.load_config();
+    let deck = files.load_deck();
 
     let (input, magnifier) = system_sinks(&settings.settings);
     let machine = net::machine_name();
@@ -64,9 +65,13 @@ pub fn open(dir: PathBuf) -> Result<Opened, Box<dyn std::error::Error + Send + S
     let app = AppState::new(
         settings,
         registry,
+        deck,
         persist.clone(),
-        input,
-        magnifier,
+        Sinks {
+            input,
+            magnifier,
+            launcher: Arc::new(crate::actions::SystemLauncher),
+        },
         machine.clone(),
     );
     let ips: IpProvider = Arc::new(net::local_ipv4s);

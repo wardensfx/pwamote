@@ -25,10 +25,12 @@ flowchart LR
     CORE["pwamote-core<br/>pointeur · loupe · réglages · appairage"]
     IN["InputSink<br/>SendInput"]
     MAG["MagnifierSink<br/>API Magnification"]
+    ACT["Actions<br/>touches · programmes · ouvertures"]
     ST["AppState<br/>réglages + appareils (JSON)"]
     WEB --> SES --> CORE
     SES --> IN
     SES --> MAG
+    SES --> ACT
     SES <--> ST
   end
 
@@ -47,9 +49,9 @@ L'application Windows est une coque **Tauri 2** (WebView2) autour du même serve
 flowchart LR
   subgraph Desktop["pwamote-desktop (Tauri)"]
     direction TB
-    WIN["Fenêtre Solid<br/>état · QR · adresse · appareils · options"]
+    WIN["Fenêtre Solid<br/>Connexion : état · QR · adresse · appareils · options<br/>Actions : pages · grille · étapes · champs"]
     TRAY["Icône de la barre système<br/>Ouvrir · Serveur actif · Quitter"]
-    CMD["Commandes IPC<br/>get_status · set_config · set_enabled<br/>new_pairing · list_devices · revoke_device"]
+    CMD["Commandes IPC<br/>get_status · set_config · set_enabled<br/>new_pairing · list_devices · revoke_device<br/>get_deck · set_deck · test_action"]
     PLUG["Plugins<br/>instance unique · lancement avec Windows"]
     WIN <--> CMD
     TRAY --> CMD
@@ -106,7 +108,7 @@ L'adresse encodée dans le QR est **au choix** : IPv4 recommandée (fonctionne p
 
 ```mermaid
 flowchart TD
-  R["pwamote/"] --> C["crates/pwamote-core<br/>protocole · réglages · appairage<br/>pointeur · loupe"]
+  R["pwamote/"] --> C["crates/pwamote-core<br/>protocole · réglages · appairage<br/>pointeur · loupe · actions"]
   R --> S["crates/pwamote-server<br/>web · session · TLS · mDNS · plateforme"]
   R --> CL["client/<br/>PWA Vite + Solid + TypeScript"]
   R --> DE["crates/pwamote-desktop<br/>coque Tauri : fenêtre, tray, démarrage"]
@@ -244,9 +246,9 @@ Les réglages sont validés et ramenés dans des plages sûres côté serveur (`
 
 | Direction | Canal | Contenu |
 |---|---|---|
-| téléphone → PC | JSON | `hello`, `pair`, `button`, `key_tap`, `key`, `modifier`, `text`, `clutch`, `recenter`, `magnifier`, `update_settings`, `ping` |
+| téléphone → PC | JSON | `hello`, `pair`, `button`, `key_tap`, `key`, `modifier`, `text`, `clutch`, `recenter`, `magnifier`, `update_settings`, `run_action`, `ping` |
 | téléphone → PC | binaire | `0x01` mouvement (7 × f32), `0x02` trackpad (2 × f32), `0x03` défilement (2 × f32), `0x04` accélération linéaire pour l'option « déplacements du téléphone » (4 × f32), little-endian |
-| PC → téléphone | JSON | `paired`, `welcome`, `settings`, `magnifier_state`, `error`, `pong` |
+| PC → téléphone | JSON | `paired`, `welcome`, `deck`, `settings`, `magnifier_state`, `action_result`, `error`, `pong` |
 
 Garanties de sécurité côté serveur :
 
@@ -254,6 +256,123 @@ Garanties de sécurité côté serveur :
 - un clic, une touche ou un modificateur maintenu est **relâché** quand le téléphone se déconnecte ;
 - les doubles « appui » sont ignorés (seules les vraies transitions partent) ;
 - taille de message limitée à 64 Ko, trames binaires invalides ignorées.
+
+## Actions programmables
+
+Un panneau de boutons façon Stream Deck, ouvert par la pastille **Actions** du téléphone. Tout se définit dans la fenêtre du PC, onglet **Actions** : pages, taille de la grille (2 à 5 colonnes, 1 à 6 lignes), boutons (libellé, icône, couleur), étapes, et champs à demander au téléphone. Le panneau est enregistré dans `%APPDATA%\PwaMote\actions.json` ; au premier lancement, un exemple est proposé (vitesse des vidéos avec S et D, raccourcis, recherche YouTube).
+
+```mermaid
+classDiagram
+  direction LR
+  class Deck {
+    pages
+  }
+  class DeckPage {
+    id
+    name
+    columns
+    rows
+    cells
+  }
+  class ActionButton {
+    id
+    label
+    icon
+    color
+  }
+  class ActionInput {
+    id
+    label
+  }
+  class InputKind {
+    <<enumeration>>
+    choice : options, default
+    slider : min, max, step, default, unit
+    number : min, max, default, integer
+    text : default, placeholder
+    toggle : default, on, off
+  }
+  class ActionStep {
+    <<enumeration>>
+    keys : key, modifiers
+    text : text
+    run : program, args, cwd, hidden
+    open : target
+    delay : ms
+  }
+  Deck "1" --> "*" DeckPage
+  DeckPage "1" --> "*" ActionButton : cases de la grille
+  ActionButton "1" --> "0..8" ActionInput : champs demandés
+  ActionInput --> InputKind
+  ActionButton "1" --> "1..32" ActionStep : dans l'ordre
+```
+
+Les étapes **ne quittent jamais le PC** : le téléphone reçoit une vue (`DeckView`) avec la disposition, les libellés et les champs, sans programmes ni commandes.
+
+```mermaid
+flowchart LR
+  subgraph PC["PC"]
+    ED["Fenêtre · onglet Actions<br/>éditeur, essai sur le PC"] -- "set_deck (IPC Tauri)" --> ST["AppState<br/>Deck::sanitized"]
+    ST --> F[("actions.json")]
+    ST -- "deck.view()" --> BR["diffusion"]
+  end
+  BR -- "{t: deck, deck: DeckView}<br/>à l'ouverture et à chaque modification" --> PH["Téléphone<br/>panneau Actions"]
+```
+
+### Lancer une action
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as Utilisateur
+  participant P as PWA
+  participant S as Session (serveur)
+  participant X as Exécution (thread à part)
+  participant W as Windows
+
+  U->>P: touche un bouton
+  alt le bouton a des champs
+    P->>U: formulaire (liste, curseur, nombre, texte, interrupteur)<br/>dernières valeurs reprises
+    U->>P: Lancer
+  end
+  P->>S: {t: "run_action", id, values}
+  S->>S: session authentifiée ?<br/>bouton défini sur le PC ?<br/>chaque valeur conforme à son champ ?
+  alt refus
+    S-->>P: {t: "action_result", ok: false, message}
+  else plan validé
+    S->>X: ActionJob (au plus 4 en même temps)
+    loop chaque étape
+      X->>W: SendInput (touches, texte) · CreateProcess · ShellExecute · pause
+    end
+    X-->>P: {t: "action_result", ok, message}
+  end
+  P->>U: contour vert, ou rouge et message
+```
+
+L'exécution a lieu hors de la boucle du WebSocket : une pause de 2 s dans une action ne fige pas le pointeur.
+
+### Valeurs saisies et sécurité
+
+```mermaid
+flowchart TD
+  V["Valeur reçue du téléphone"] --> K{"Champ déclaré<br/>pour ce bouton ?"}
+  K -- non --> R["refus : champ inconnu"]
+  K -- oui --> T{"Type du champ"}
+  T -- liste --> C["une des valeurs prévues"]
+  T -- curseur --> S["nombre fini, dans min…max,<br/>arrondi au pas"]
+  T -- nombre --> N["nombre fini, bornes,<br/>entier si demandé"]
+  T -- texte --> X["≤ 1 000 caractères,<br/>sans caractère nul"]
+  T -- interrupteur --> B["booléen → valeur<br/>« activé » ou « désactivé »"]
+  C & S & N & X & B --> P["{champ} remplacé dans :<br/>texte tapé · arguments · adresse à ouvrir<br/>{champ:url} encodé pour une adresse"]
+  P --> G["jamais dans le programme ni dans son dossier ;<br/>chaque argument reste un argument,<br/>aucun interpréteur de commandes"]
+```
+
+- seules les actions définies dans la fenêtre du PC existent ; le téléphone ne peut ni en créer ni en modifier ;
+- seul un téléphone associé (après `hello` ou `pair`) peut en lancer ;
+- un champ texte libre peut contenir n'importe quoi : pour un script, passer la valeur en argument (`-File script.ps1 {champ}`) plutôt que de construire une commande ; l'éditeur avertit si une cible « Ouvrir » commence par un champ.
+
+Les touches passent par `SendInput` avec leur code virtuel **et** leur code de balayage : pour un navigateur, c'est une vraie frappe (`KeyboardEvent.key` et `code` renseignés), ce que les extensions comme les contrôleurs de vitesse vidéo attendent. Le texte du clavier, lui, est envoyé en Unicode : parfait pour écrire, invisible pour ces raccourcis.
+
 
 ## Loupe intelligente
 

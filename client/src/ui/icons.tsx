@@ -30,3 +30,11 @@ export const CenterIcon = I(
     <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
   </>,
 );
+export const DeckIcon = I(
+  <>
+    <rect x="3.5" y="3.5" width="7" height="7" rx="2" />
+    <rect x="13.5" y="3.5" width="7" height="7" rx="2" />
+    <rect x="3.5" y="13.5" width="7" height="7" rx="2" />
+    <path d="M17 13.8v6.4M13.8 17h6.4" />
+  </>,
+);
