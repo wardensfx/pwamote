@@ -62,25 +62,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let _announcer = mdns::announce(host.trim_end_matches(".local"), &ips, PORT, &machine)
+    let _announcer = mdns::announce(&host, &ips, PORT, &machine)
         .map_err(|e| tracing::warn!(error = %e, "annonce mDNS impossible"))
         .ok();
 
     let code = app.new_pairing_code();
-    let url = format!("https://{host}:{PORT}/#/pair/{code}");
-    println!("\nPwaMote prêt. Ouvrez ce lien sur le téléphone :\n  {url}\n");
-    if let Ok(qr) = qrcode::QrCode::new(url.as_bytes()) {
-        println!(
-            "{}",
-            qr.render::<qrcode::render::unicode::Dense1x2>()
-                .quiet_zone(true)
-                .build()
-        );
-    }
+    let origin = format!("https://{host}:{PORT}");
+    let url = pwamote_server::web::pairing_url(&origin, &code);
+    println!("\nPwaMote prêt.\n  QR code (à scanner avec l'iPhone) : https://localhost:{PORT}/admin/pair\n  ou lien direct : {url}\n");
 
     let addr = SocketAddr::from(([0, 0, 0, 0], PORT));
     axum_server::bind_rustls(addr, tls)
-        .serve(router(WebState { app, pki }).into_make_service())
+        .serve(
+            router(WebState { app, pki, origin })
+                .into_make_service_with_connect_info::<SocketAddr>(),
+        )
         .await?;
     Ok(())
 }

@@ -60,9 +60,13 @@ async fn boot() -> (String, Arc<AppState>, Arc<Recorder>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
-        axum::serve(listener, router(WebState { app: app2, pki }))
-            .await
-            .unwrap()
+        let state = WebState {
+            app: app2,
+            pki,
+            origin: "https://pwamote-test.local:8443".into(),
+        };
+        let service = router(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
+        axum::serve(listener, service).await.unwrap()
     });
     (format!("ws://{addr}/ws"), app, rec)
 }
@@ -223,4 +227,36 @@ async fn serves_the_app_and_the_ios_profile() {
     assert!(get(&base, "/ca.cer")
         .await
         .contains("application/x-x509-ca-cert"));
+}
+
+#[tokio::test]
+async fn pairing_page_is_local_only_and_issues_a_working_code() {
+    let (url, app, _rec) = boot().await;
+    let base = url.replace("ws://", "").replace("/ws", "");
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::TcpStream::connect(&base).await.unwrap();
+    s.write_all(b"GET /admin/pair HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut out = Vec::new();
+    s.read_to_end(&mut out).await.unwrap();
+    let page = String::from_utf8_lossy(&out).into_owned();
+    // Le test se connecte depuis 127.0.0.1 : accepté.
+    assert!(page.contains("200 OK"), "{page}");
+    assert!(page.contains("<svg") && page.contains("https://pwamote-test.local:8443/#/pair/"));
+    let code = page
+        .split("#/pair/")
+        .nth(1)
+        .unwrap()
+        .split('<')
+        .next()
+        .unwrap();
+    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    ws.send(Message::text(
+        json!({"t":"pair","code":code,"device_name":"x","protocol":1}).to_string(),
+    ))
+    .await
+    .unwrap();
+    assert_eq!(recv_json(&mut ws).await["t"], "paired");
+    let _ = app;
 }

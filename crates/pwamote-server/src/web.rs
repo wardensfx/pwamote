@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{ConnectInfo, State};
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -11,6 +11,7 @@ use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 use pwamote_core::protocol::ServerMessage;
 use rust_embed::RustEmbed;
+use std::net::SocketAddr;
 
 use crate::session::Session;
 use crate::state::AppState;
@@ -21,13 +22,15 @@ const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 
 /// La PWA compilée (`client/dist`), embarquée dans le binaire.
 #[derive(RustEmbed)]
-#[folder = "assets/"]
+#[folder = "../../client/dist/"]
 struct Assets;
 
 #[derive(Clone)]
 pub struct WebState {
     pub app: Arc<AppState>,
     pub pki: Arc<Pki>,
+    /// Adresse publique, telle que le téléphone doit l'ouvrir : `https://pwamote-pc.local:8443`.
+    pub origin: String,
 }
 
 pub fn router(state: WebState) -> Router {
@@ -35,6 +38,7 @@ pub fn router(state: WebState) -> Router {
         .route("/ws", get(ws_handler))
         .route("/ca.cer", get(ca_cer))
         .route("/pwamote.mobileconfig", get(mobileconfig))
+        .route("/admin/pair", get(pair_page))
         .route("/healthz", get(|| async { "ok" }))
         .fallback(static_asset)
         .with_state(state)
@@ -147,4 +151,57 @@ pub async fn serve_socket(socket: WebSocket, app: Arc<AppState>) {
         }
     }
     // `session` est détruite ici : tout bouton ou modificateur maintenu est relâché.
+}
+
+/// Lien d'appairage pour un code donné.
+pub fn pairing_url(origin: &str, code: &str) -> String {
+    format!("{origin}/#/pair/{code}")
+}
+
+/// QR code en SVG, en couleurs standard (noir sur blanc) pour un scan fiable.
+pub fn qr_svg(data: &str) -> String {
+    qrcode::QrCode::new(data.as_bytes())
+        .map(|qr| {
+            qr.render::<qrcode::render::svg::Color>()
+                .min_dimensions(320, 320)
+                .quiet_zone(true)
+                .dark_color(qrcode::render::svg::Color("#0b0c0f"))
+                .light_color(qrcode::render::svg::Color("#ffffff"))
+                .build()
+        })
+        .unwrap_or_default()
+}
+
+/// Page d'appairage, réservée à la machine elle-même : un nouveau code à chaque affichage.
+async fn pair_page(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(s): State<WebState>,
+) -> Response {
+    if !peer.ip().is_loopback() {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let url = pairing_url(&s.origin, &s.app.new_pairing_code());
+    let html = format!(
+        r#"<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Associer un téléphone · PwaMote</title>
+<style>
+body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0c0f;color:#eceef2;font:500 16px/1.4 system-ui,sans-serif}}
+main{{display:grid;gap:22px;justify-items:center;padding:32px;text-align:center}}
+h1{{margin:0;font-size:28px;letter-spacing:-.03em}} p{{margin:0;color:#a3a6ad;max-width:34ch}}
+.qr{{background:#fff;padding:14px;border-radius:24px;line-height:0}} .qr svg{{width:300px;height:300px}}
+code{{font-size:13px;color:#a3a6ad;word-break:break-all}}
+</style><main><h1>Associer un téléphone</h1>
+<p>Scannez ce code avec l'appareil photo de l'iPhone. Il expire dans 5 minutes et ne sert qu'une fois.</p>
+<div class="qr">{svg}</div><code>{url}</code>
+<p><a style="color:#f0c27a" href="/admin/pair">Nouveau code</a> · <a style="color:#f0c27a" href="/pwamote.mobileconfig">Profil de confiance iOS</a></p></main>"#,
+        svg = qr_svg(&url),
+    );
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        html,
+    )
+        .into_response()
 }
