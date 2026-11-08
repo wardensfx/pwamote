@@ -7,7 +7,7 @@ export type PointerSettings = { mode: PointerMode,
  */
 sensitivity: number, 
 /**
- * 0 = linéaire, 1 = forte accélération pour les gestes rapides.
+ * 0 = linéaire, 1 = forte accélération pour les gestes rapides, jusqu'à 3 pour traverser deux écrans.
  */
 acceleration: number, 
 /**

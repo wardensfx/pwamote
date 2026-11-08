@@ -74,8 +74,8 @@ export function SettingsSheet(props: { remote: RemoteController; onClose: () => 
                   onChange={(mode) => pointer({ mode })}
                 />
               </div>
-              <Slider label="Sensibilité" min={5} max={120} step={1} value={cfg().pointer.sensitivity} format={(v) => `${Math.round(v)}`} onChange={(sensitivity) => pointer({ sensitivity })} />
-              <Slider label="Accélération" min={0} max={1} step={0.05} value={cfg().pointer.acceleration} format={(v) => `${Math.round(v * 100)} %`} onChange={(acceleration) => pointer({ acceleration })} />
+              <Slider label="Sensibilité" min={5} max={500} step={1} value={cfg().pointer.sensitivity} format={(v) => `${Math.round(v)}`} onChange={(sensitivity) => pointer({ sensitivity })} />
+              <Slider label="Accélération" min={0} max={3} step={0.05} value={cfg().pointer.acceleration} format={(v) => `${Math.round(v * 100)} %`} onChange={(acceleration) => pointer({ acceleration })} />
               <Slider label="Lissage" min={0} max={1} step={0.05} value={cfg().pointer.smoothing} format={(v) => `${Math.round(v * 100)} %`} onChange={(smoothing) => pointer({ smoothing })} />
               <Slider label="Zone morte" min={0} max={6} step={0.1} value={cfg().pointer.deadzone_dps} format={(v) => `${v.toFixed(1)} °/s`} onChange={(deadzone_dps) => pointer({ deadzone_dps })} />
               <Slider label="Vitesse du trackpad" min={0.5} max={12} step={0.1} value={cfg().pointer.trackpad_speed} format={(v) => `×${v.toFixed(1)}`} onChange={(trackpad_speed) => pointer({ trackpad_speed })} />

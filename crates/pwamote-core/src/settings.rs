@@ -38,7 +38,7 @@ pub struct PointerSettings {
     pub mode: PointerMode,
     /// Pixels par degré de rotation à vitesse lente.
     pub sensitivity: f32,
-    /// 0 = linéaire, 1 = forte accélération pour les gestes rapides.
+    /// 0 = linéaire, 1 = forte accélération pour les gestes rapides, jusqu'à 3 pour traverser deux écrans.
     pub acceleration: f32,
     /// 0 = brut, 1 = très lissé (filtre One Euro).
     pub smoothing: f32,
@@ -153,12 +153,18 @@ impl Settings {
     pub fn sanitized(mut self) -> Self {
         let d = Settings::default();
         let p = &mut self.pointer;
-        p.sensitivity = clamp_finite(p.sensitivity, 5.0, 200.0, d.pointer.sensitivity);
-        p.acceleration = clamp_finite(p.acceleration, 0.0, 1.0, d.pointer.acceleration);
+        p.sensitivity = clamp_finite(p.sensitivity, 5.0, 500.0, d.pointer.sensitivity);
+        p.acceleration = clamp_finite(p.acceleration, 0.0, 3.0, d.pointer.acceleration);
         p.smoothing = clamp_finite(p.smoothing, 0.0, 1.0, d.pointer.smoothing);
         p.deadzone_dps = clamp_finite(p.deadzone_dps, 0.0, 10.0, d.pointer.deadzone_dps);
         p.trackpad_speed = clamp_finite(p.trackpad_speed, 0.2, 12.0, d.pointer.trackpad_speed);
         p.scroll_speed = clamp_finite(p.scroll_speed, 0.1, 6.0, d.pointer.scroll_speed);
+        p.translation_gain = clamp_finite(
+            p.translation_gain,
+            100.0,
+            20_000.0,
+            d.pointer.translation_gain,
+        );
         let m = &mut self.magnifier;
         m.zoom = clamp_finite(m.zoom, 1.25, 8.0, d.magnifier.zoom);
         m.animation_ms = m.animation_ms.min(1000);
@@ -250,7 +256,7 @@ mod tests {
         s.pointer.smoothing = -3.0;
         s.magnifier.zoom = 0.5;
         let s = s.sanitized();
-        assert_eq!(s.pointer.sensitivity, 200.0);
+        assert_eq!(s.pointer.sensitivity, 500.0);
         assert_eq!(s.pointer.smoothing, 0.0);
         assert_eq!(s.magnifier.zoom, 1.25);
     }
