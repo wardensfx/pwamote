@@ -326,7 +326,12 @@ export function DeckEditor(props: { backend: Backend; onDirty?: (dirty: boolean)
   const [draft, setDraft] = createStore<Deck>({ pages: [] });
   const [pageIx, setPageIx] = createSignal(0);
   const [cellIx, setCellIx] = createSignal<number | null>(null);
+  // Glisser-déposer aux événements de pointeur : le glisser HTML5 est intercepté par la fenêtre
+  // Tauri (dépôt de fichiers) et ne fonctionne pas dans WebView2.
   const [dragFrom, setDragFrom] = createSignal<number | null>(null);
+  const [dragOver, setDragOver] = createSignal<number | null>(null);
+  const [dragging, setDragging] = createSignal(false);
+  let justDropped = false;
   const [busy, setBusy] = createSignal(false);
   const [test, setTest] = createSignal<{ id: string; state: "running" | "ok" | "error"; message?: string } | null>(null);
   const [error, setError] = createSignal<string | null>(null);
@@ -391,6 +396,42 @@ export function DeckEditor(props: { backend: Backend; onDirty?: (dirty: boolean)
   const onCell = (i: number) => {
     if (!page()?.cells[i]) editPage((p) => (p.cells[i] = newButton()));
     setCellIx(i);
+  };
+
+  const cellAt = (x: number, y: number): number | null => {
+    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-cell]");
+    return el ? Number(el.dataset.cell) : null;
+  };
+
+  const startDrag = (from: number, down: PointerEvent) => {
+    setDragFrom(from);
+    setDragOver(from);
+    const move = (e: PointerEvent) => {
+      if (!dragging() && Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < 6) return;
+      setDragging(true);
+      setDragOver(cellAt(e.clientX, e.clientY));
+    };
+    const up = (e: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      const to = e.type === "pointerup" ? cellAt(e.clientX, e.clientY) : null;
+      if (dragging()) {
+        justDropped = true;
+        setTimeout(() => (justDropped = false), 0);
+        if (to !== null && to !== from) {
+          replacePage((x) => swapCells(x, from, to));
+          if (cellIx() === from) setCellIx(to);
+          else if (cellIx() === to) setCellIx(from);
+        }
+      }
+      setDragging(false);
+      setDragFrom(null);
+      setDragOver(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   };
 
   const save = async (): Promise<boolean> => {
@@ -497,25 +538,20 @@ export function DeckEditor(props: { backend: Backend; onDirty?: (dirty: boolean)
                       {(cell, i) => (
                         <button
                           class="cell"
-                          classList={{ filled: !!cell, selected: cellIx() === i(), over: dragFrom() !== null && dragFrom() !== i() }}
+                          classList={{
+                            filled: !!cell,
+                            selected: cellIx() === i(),
+                            dragging: dragging() && dragFrom() === i(),
+                            over: dragging() && dragOver() === i() && dragFrom() !== i(),
+                          }}
+                          data-cell={i()}
                           data-color={cell?.color}
-                          draggable={!!cell}
-                          onDragStart={(e) => {
-                            setDragFrom(i());
-                            e.dataTransfer?.setData("text/plain", String(i()));
+                          onPointerDown={(e) => cell && e.button === 0 && startDrag(i(), e)}
+                          onClick={() => {
+                            // Un glisser qui vient de se terminer n'est pas un clic.
+                            if (justDropped) return;
+                            onCell(i());
                           }}
-                          onDragEnd={() => setDragFrom(null)}
-                          onDragOver={(e) => e.preventDefault()}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            const from = dragFrom();
-                            setDragFrom(null);
-                            if (from === null || from === i()) return;
-                            replacePage((x) => swapCells(x, from, i()));
-                            if (cellIx() === from) setCellIx(i());
-                            else if (cellIx() === i()) setCellIx(from);
-                          }}
-                          onClick={() => onCell(i())}
                           title={cell ? "Cliquer pour modifier · glisser pour déplacer" : "Ajouter une action ici"}
                         >
                           <Show when={cell} fallback={<span class="cell-add">+</span>}>
