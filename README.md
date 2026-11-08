@@ -13,17 +13,19 @@ Cible actuelle : serveur **Windows 11**, client **iPhone** (Safari, installable 
 
 ## Démarrer
 
-Prérequis : Rust stable, Node 22.
+Prérequis : Rust stable, Node 22, WebView2 (déjà présent sur Windows 11).
 
 ```powershell
-cd client
-npm ci
-npm run build          # produit client/dist, embarqué dans le serveur
-cd ..
-cargo run --release -p pwamote-server
+cd client;     npm ci; npm run build; cd ..     # la PWA, embarquée dans le serveur
+cd desktop-ui; npm ci; npm run build; cd ..     # l'interface de la fenêtre
+cargo run --release -p pwamote-desktop          # l'application de bureau
 ```
 
-Au lancement, le serveur affiche l'adresse à ouvrir. Sur le PC, ouvrez `https://localhost:8443/admin/pair` et scannez le QR code avec l'appareil photo de l'iPhone.
+L'application s'ouvre avec le **QR code** et l'état du serveur. Elle vit ensuite dans la **barre système** : fermer la fenêtre la réduit, un clic sur l'icône la rouvre, le menu de l'icône active ou arrête le serveur et quitte. Dans la fenêtre : adresse encodée dans le QR (IPv4, nom `.local` ou saisie libre), lancement avec Windows, démarrage réduit, port, liste des appareils associés.
+
+L'installeur Windows (`.exe`, installation par utilisateur) est produit par la CI : artefact `pwamote-installer-windows`.
+
+Mode ligne de commande, sans fenêtre : `cargo run --release -p pwamote-server`, puis `https://localhost:8443/admin/pair` pour le QR code.
 
 ### Première fois sur iPhone : faire confiance au PC
 
@@ -39,12 +41,13 @@ Ajoutez ensuite la page à l'écran d'accueil (Partager › Sur l'écran d'accue
 ## Développer
 
 ```bash
-cargo test --workspace            # cœur, serveur, bout en bout WebSocket (génère aussi client/src/generated)
-cd client && npm test             # Vitest
+cargo test --workspace --exclude pwamote-desktop   # cœur, serveur, bout en bout (génère aussi client/src/generated)
+cd client && npm test                               # Vitest de la PWA
+cd desktop-ui && npm test                           # Vitest de la fenêtre
 cd client && npm run dev          # client seul, avec proxy vers le serveur local
 ```
 
-Le serveur compile sur Linux/macOS avec des adaptateurs qui se contentent de journaliser : on peut y développer l'interface sans Windows.
+`pwamote-desktop` (Tauri) se compile sous Windows, où la CI le teste ; sous Linux il demande WebKitGTK, d'où l'exclusion ci-dessus. Le serveur compile sur Linux/macOS avec des adaptateurs qui se contentent de journaliser : on peut y développer l'interface sans Windows.
 
 Développement guidé par les tests : toute logique vit dans `pwamote-core` (sans OS) ou dans `client/src/lib` (sans DOM), testée avant l'adaptateur qui l'utilise.
 
@@ -62,4 +65,4 @@ Trunk-based development : branches courtes, intégration fréquente dans `main`,
 | Loupe Windows (API Magnification) | écrite, à valider sur Windows |
 | Caret via UI Automation (navigateurs, Electron) | à faire |
 | Boutons de volume du téléphone | impossible en PWA, voir l'architecture |
-| Fenêtre et icône dans la zone de notification (Tauri) | à faire |
+| Application de bureau : fenêtre, barre système, démarrage avec Windows, choix de l'adresse du QR | écrite, interface vérifiée dans un navigateur, à valider sur Windows |

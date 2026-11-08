@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/pwamote-core", "crates/pwamote-server"]
+members = ["crates/pwamote-core", "crates/pwamote-server", "crates/pwamote-desktop"]
 
 [workspace.package]
 version = "0.1.0"

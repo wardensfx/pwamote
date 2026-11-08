@@ -322,7 +322,7 @@ fn host_for_url(host: &str) -> String {
 fn friendly_bind_error(raw: &str, port: u16) -> String {
     let lower = raw.to_lowercase();
     if lower.contains("in use") || lower.contains("10048") || lower.contains("address already") {
-        format!("Le port {port} est déjà utilisé par un autre programme. Choisissez-en un autre dans les réglages.")
+        format!("Le port {port} est déjà utilisé par un autre programme. Choisissez-en un autre dans les options.")
     } else if lower.contains("permission") || lower.contains("10013") || lower.contains("access") {
         format!("Windows refuse l'écoute sur le port {port}. Essayez un port supérieur à 1024.")
     } else {

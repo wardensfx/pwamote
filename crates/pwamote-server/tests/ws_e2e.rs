@@ -262,3 +262,25 @@ async fn pairing_page_is_local_only_and_issues_a_working_code() {
     assert_eq!(recv_json(&mut ws).await["t"], "paired");
     let _ = app;
 }
+
+#[tokio::test]
+async fn revoking_a_device_cuts_its_live_session_and_updates_the_counter() {
+    let (url, app, _rec) = boot().await;
+    let (mut ws, _) = pair(&url, &app).await;
+    assert_eq!(app.connected_count(), 1);
+
+    let id = app.devices()[0].id.clone();
+    assert!(app.revoke(&id));
+
+    let msg = recv_json(&mut ws).await;
+    assert_eq!(msg["code"], "unauthorized");
+    // La socket est ensuite fermée côté serveur.
+    loop {
+        match ws.next().await {
+            None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+            Some(Ok(_)) => continue,
+        }
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(app.connected_count(), 0);
+}

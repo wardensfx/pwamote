@@ -34,16 +34,41 @@ jobs:
           name: client-dist
           path: client/dist
 
+  desktop-ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop-ui/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-ui-dist
+          path: desktop-ui/dist
+
   rust:
     # Le serveur cible Windows : on teste et on compile là où il tournera.
     runs-on: windows-latest
-    needs: client
+    needs: [client, desktop-ui]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: client-dist
           path: client/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-ui-dist
+          path: desktop-ui/dist
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -56,6 +81,37 @@ jobs:
         with:
           name: pwamote-server-windows
           path: target/release/pwamote-server.exe
+
+  # Installeur de l'application de bureau (NSIS, installation par utilisateur, sans droits administrateur).
+  installer:
+    runs-on: windows-latest
+    needs: [client, desktop-ui]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-ui-dist
+          path: desktop-ui/dist
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop-ui/package-lock.json
+      - run: npm ci
+        working-directory: desktop-ui
+      # Le CLI Tauri est installé dans desktop-ui ; on le lance depuis le dossier du crate.
+      - run: npm exec --prefix ../../desktop-ui -- tauri build --ci
+        working-directory: crates/pwamote-desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pwamote-installer-windows
+          path: target/release/bundle/nsis/*.exe
 
   # Les types TypeScript générés par ts-rs doivent toujours refléter le protocole Rust.
   types-in-sync:

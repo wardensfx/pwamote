@@ -39,6 +39,69 @@ flowchart LR
 
 Le serveur est découpé en **cœur pur** (`pwamote-core`, testé sans OS) et **adaptateurs** (`InputSink`, `MagnifierSink`) : les tests de session tournent avec de faux adaptateurs, Windows n'est impliqué que dans la dernière couche.
 
+## Application de bureau
+
+L'application Windows est une coque **Tauri 2** (WebView2) autour du même serveur. La fenêtre (`desktop-ui/`, Solid) parle à Rust par des commandes ; le **superviseur** démarre, arrête et redémarre l'écoute à chaud.
+
+```mermaid
+flowchart LR
+  subgraph Desktop["pwamote-desktop (Tauri)"]
+    direction TB
+    WIN["Fenêtre Solid<br/>état · QR · adresse · appareils · options"]
+    TRAY["Icône de la barre système<br/>Ouvrir · Serveur actif · Quitter"]
+    CMD["Commandes IPC<br/>get_status · set_config · set_enabled<br/>new_pairing · list_devices · revoke_device"]
+    PLUG["Plugins<br/>instance unique · lancement avec Windows"]
+    WIN <--> CMD
+    TRAY --> CMD
+  end
+  subgraph Lib["pwamote-server (bibliothèque)"]
+    direction TB
+    SUP["Supervisor<br/>start · stop · set_config · pairing"]
+    CFG["AppConfig<br/>port · adresse · démarrage · tray"]
+    ST["AppState<br/>réglages · appareils"]
+    NET["axum + rustls · mDNS"]
+    SUP --> NET
+    SUP --> CFG
+    SUP --> ST
+  end
+  CMD --> SUP
+  CLI["pwamote-server (CLI)"] --> SUP
+```
+
+### Cycle de vie de la fenêtre
+
+```mermaid
+stateDiagram-v2
+  [*] --> Demarrage
+  Demarrage --> FenetreOuverte: démarrer réduit = non
+  Demarrage --> Reduite: démarrer réduit = oui
+  FenetreOuverte --> Reduite: fermer (réduire à la fermeture = oui)
+  FenetreOuverte --> [*]: fermer (réduire à la fermeture = non)
+  Reduite --> FenetreOuverte: clic sur l'icône, « Ouvrir », ou 2e lancement
+  Reduite --> [*]: menu « Quitter »
+  FenetreOuverte --> [*]: menu « Quitter »
+  note right of Reduite: le serveur continue d'écouter
+```
+
+### Serveur : activer, arrêter, changer d'adresse
+
+```mermaid
+flowchart TD
+  A["set_config / set_enabled"] --> B{"serveur actif ?"}
+  B -- non --> C["arrêt gracieux (300 ms)<br/>les WebSocket sont coupées"]
+  B -- oui --> D{"port ou adresse changés ?"}
+  D -- non --> E["rien à redémarrer<br/>(options de fenêtre, démarrage)"]
+  D -- oui --> F["arrêt puis démarrage"]
+  F --> G["certificat réémis<br/>pour l'adresse choisie"]
+  G --> H["écoute sur 0.0.0.0:port"]
+  H -- échec --> I["erreur claire dans la fenêtre<br/>ex. port déjà utilisé"]
+  H -- ok --> J["origine = https://adresse:port<br/>nouveau QR code"]
+  C --> K["coche du menu et info-bulle mises à jour"]
+  J --> K
+```
+
+L'adresse encodée dans le QR est **au choix** : IPv4 recommandée (fonctionne partout), autre IPv4, nom `.local` (stable si l'IP change, mais dépend du mDNS), ou nom saisi (VPN, DNS interne). Le certificat couvre toujours l'adresse choisie. Les appareils restent associés par origine : changer d'adresse oblige un téléphone à se ré-appairer, car le navigateur isole ses données par origine.
+
 ## Dépôt
 
 ```mermaid
@@ -46,6 +109,10 @@ flowchart TD
   R["pwamote/"] --> C["crates/pwamote-core<br/>protocole · réglages · appairage<br/>pointeur · loupe"]
   R --> S["crates/pwamote-server<br/>web · session · TLS · mDNS · plateforme"]
   R --> CL["client/<br/>PWA Vite + Solid + TypeScript"]
+  R --> DE["crates/pwamote-desktop<br/>coque Tauri : fenêtre, tray, démarrage"]
+  R --> DU["desktop-ui/<br/>interface de la fenêtre (Solid)"]
+  DU -- "npm run build" --> DUD["desktop-ui/dist"]
+  DUD --> DE
   R --> D["docs/"]
   C -- "cargo test génère (ts-rs)" --> G["client/src/generated/*.ts"]
   G --> CL
