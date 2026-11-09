@@ -112,6 +112,13 @@ body {
   .pad { gap: 12px; }
 }
 .pad .enable { position: relative; flex: none; }
+/* Gyro continu : la surface entière est le bouton gauche. */
+.pad[data-mode="air_always"] { transition: transform 0.28s var(--spring), background 0.15s, border-color 0.15s, box-shadow 0.4s; }
+.pad[data-mode="air_always"] .hint { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; transition: color 0.15s; }
+.pad[data-mode="air_always"][data-down="true"] { transform: scale(0.985); background: var(--accent); border-color: transparent; }
+.pad[data-mode="air_always"][data-down="true"]::before { opacity: 0; }
+.pad[data-mode="air_always"][data-down="true"] .hint,
+.pad[data-mode="air_always"][data-down="true"] .hint small { color: var(--accent-ink); }
 
 /* ---------- Pastilles d'action ---------- */
 .chips { display: flex; gap: 8px; }

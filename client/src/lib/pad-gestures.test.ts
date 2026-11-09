@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PointerMode } from "../generated/PointerMode";
 import { PadGestures } from "./pad-gestures";
 
@@ -10,6 +10,7 @@ function setup(mode: PointerMode) {
       trackpad: (dx, dy) => log.push(`trackpad ${dx} ${dy}`),
       scroll: (dx, dy) => log.push(`scroll ${dx} ${dy}`),
       click: () => log.push("click"),
+      press: (down) => log.push(`press ${down}`),
     },
     () => mode,
   );
@@ -45,14 +46,6 @@ describe("PadGestures", () => {
     expect(log).toEqual(["clutch true", "clutch false"]);
   });
 
-  it("en mode gyro continu, le doigt ne défile pas", () => {
-    const { g, log } = setup("air_always");
-    g.down(1, 0, 0, 0);
-    g.move(1, 0, 80);
-    g.up(1, 900);
-    expect(log).toEqual(["clutch true", "clutch false"]);
-  });
-
   it("en mode trackpad, le doigt déplace le curseur", () => {
     const { g, log } = setup("trackpad");
     g.down(1, 0, 0, 0);
@@ -78,13 +71,6 @@ describe("PadGestures", () => {
     moved.g.move(1, 20, 0);
     moved.g.up(1, 100);
     expect(moved.log).not.toContain("click");
-  });
-
-  it("pas de clic par tap en mode gyro continu", () => {
-    const { g, log } = setup("air_always");
-    g.down(1, 0, 0, 0);
-    g.up(1, 50);
-    expect(log).not.toContain("click");
   });
 
   it("deux doigts font défiler, dans tous les modes", () => {
@@ -156,5 +142,91 @@ describe("PadGestures", () => {
     g.move(1, 102, 160, 1100);
     g.up(1, 1500);
     expect(log).toContain("scroll 0 30");
+  });
+});
+
+describe("PadGestures en gyro continu : la surface est le bouton gauche", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("un tap fait un clic gauche", () => {
+    const { g, log } = setup("air_always");
+    g.down(1, 50, 50, 0);
+    g.up(1, 90);
+    vi.runAllTimers();
+    expect(log.filter((l) => !l.startsWith("clutch"))).toEqual(["click"]);
+  });
+
+  it("deux taps rapprochés cliquent deux fois (double clic)", () => {
+    const { g, log } = setup("air_always");
+    g.down(1, 50, 50, 0);
+    g.up(1, 80);
+    g.down(1, 50, 50, 150);
+    g.up(1, 230);
+    expect(log.filter((l) => l === "click")).toHaveLength(2);
+  });
+
+  it("un appui maintenu enfonce le bouton jusqu'au lever du doigt (glisser-déposer)", () => {
+    const { g, log } = setup("air_always");
+    g.down(1, 50, 50, 0);
+    vi.advanceTimersByTime(300);
+    expect(log).toContain("press true");
+    // Le pouce bouge un peu pendant qu'on vise : le bouton reste enfoncé, rien ne défile.
+    g.move(1, 52, 70, 400);
+    g.move(1, 52, 110, 450);
+    g.up(1, 1200);
+    expect(log.filter((l) => !l.startsWith("clutch"))).toEqual(["press true", "press false"]);
+  });
+
+  it("glisser vite à un doigt verticalement défile sans cliquer", () => {
+    const { g, log } = setup("air_always");
+    g.down(1, 100, 100, 0);
+    g.move(1, 100, 120, 40);
+    g.move(1, 101, 150, 80);
+    g.move(1, 101, 170, 120);
+    vi.advanceTimersByTime(500);
+    g.up(1, 900);
+    const out = log.filter((l) => !l.startsWith("clutch"));
+    expect(out).toEqual(["scroll 0 30", "scroll 0 20"]);
+  });
+
+  it("un glissement horizontal bref reste un clic", () => {
+    const { g, log } = setup("air_always");
+    g.down(1, 100, 100, 0);
+    g.move(1, 130, 104, 60);
+    g.up(1, 120);
+    expect(log).toContain("click");
+    expect(log.some((l) => l.startsWith("scroll"))).toBe(false);
+  });
+
+  it("deux doigts défilent sans cliquer ni enfoncer le bouton", () => {
+    const { g, log } = setup("air_always");
+    g.down(1, 0, 0, 0);
+    g.down(2, 50, 0, 10);
+    g.move(1, 0, 20, 30);
+    vi.advanceTimersByTime(500);
+    g.up(2, 600);
+    g.up(1, 620);
+    expect(log).toContain("scroll 0 10");
+    expect(log).not.toContain("click");
+    expect(log).not.toContain("press true");
+  });
+
+  it("cancel relâche un bouton enfoncé", () => {
+    const { g, log } = setup("air_always");
+    g.down(1, 0, 0, 0);
+    vi.advanceTimersByTime(300);
+    g.cancel();
+    expect(log).toContain("press false");
+    vi.runAllTimers();
+    expect(log.filter((l) => l === "press true")).toHaveLength(1);
+  });
+
+  it("le doigt ne déplace jamais le curseur", () => {
+    const { g, log } = setup("air_always");
+    g.down(1, 0, 0, 0);
+    g.move(1, 40, 3, 50);
+    g.up(1, 900);
+    expect(log.some((l) => l.startsWith("trackpad"))).toBe(false);
   });
 });
