@@ -115,10 +115,13 @@ body {
 /* Gyro continu : la surface entière est le bouton gauche. */
 .pad[data-mode="air_always"] { transition: transform 0.28s var(--spring), background 0.15s, border-color 0.15s, box-shadow 0.4s; }
 .pad[data-mode="air_always"] .hint { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; transition: color 0.15s; }
-.pad[data-mode="air_always"][data-down="true"] { transform: scale(0.985); background: var(--accent); border-color: transparent; }
+/* Enfoncé : verre un peu plus clair et creusé, sans aplat de couleur. */
+.pad[data-mode="air_always"][data-down="true"] {
+  transform: scale(0.985); background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 2px 18px rgba(0, 0, 0, 0.35);
+}
 .pad[data-mode="air_always"][data-down="true"]::before { opacity: 0; }
-.pad[data-mode="air_always"][data-down="true"] .hint,
-.pad[data-mode="air_always"][data-down="true"] .hint small { color: var(--accent-ink); }
+.pad[data-mode="air_always"][data-down="true"] .hint { color: var(--ink); }
 
 /* ---------- Pastilles d'action ---------- */
 .chips { display: flex; gap: 8px; }
@@ -294,13 +297,6 @@ input[type="range"]::-webkit-slider-thumb {
 .deck-empty { margin: 6px 8px; color: var(--ink-dim); font-size: 14px; line-height: 1.4; }
 
 .toast.good { color: var(--accent); white-space: nowrap; }
-.clip-key svg { width: 20px; height: 20px; stroke: var(--accent); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
-.toast.clip-offer { display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 6px; white-space: nowrap; }
-.clip-offer button { font: inherit; color: var(--ink); background: none; border: 0; padding: 8px 10px; border-radius: 14px; }
-.clip-offer .clip-send { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
-.clip-offer .clip-send svg { width: 18px; height: 18px; stroke: var(--accent); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.clip-offer .clip-close { color: var(--ink-faint); font-size: 18px; line-height: 1; }
-.clip-offer button:active { background: var(--glass); }
 .toast.bad { color: var(--bad); border-color: rgba(239, 138, 128, 0.35); max-width: calc(100vw - 32px); text-align: center; }
 
 /* Formulaire d'action */
