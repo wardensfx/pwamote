@@ -1,10 +1,9 @@
 /**
- * Presse-papiers du téléphone vers le PC.
+ * Collage d'une image depuis le champ texte du téléphone vers le PC.
  *
- * Contraintes iOS : `navigator.clipboard.read()` n'est permis que dans un geste de
- * l'utilisateur (un tap), sur une page HTTPS, et Safari affiche alors une bulle « Coller »
- * à confirmer quand le contenu vient d'une autre app. Impossible donc de surveiller le
- * presse-papiers en tâche de fond : on propose l'envoi d'un tap, notamment au retour dans l'app.
+ * Un texte collé dans le champ est simplement tapé sur le PC. Une image, elle, ne peut pas
+ * entrer dans un `<input>` : on l'intercepte au collage (`clipboardData`, sans bulle « Coller »
+ * d'iOS), on l'envoie au PC qui la met dans son presse-papiers et fait Ctrl+V.
  */
 
 export interface PhoneClip {
@@ -13,13 +12,10 @@ export interface PhoneClip {
   data: Blob;
 }
 
-type ItemLike = { readonly types: readonly string[]; getType(type: string): Promise<Blob> };
-type ClipboardLike = { read?: () => Promise<readonly ItemLike[]>; readText: () => Promise<string> };
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
 /** Formats que le PC sait décoder directement. */
 const DIRECT_IMAGES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"];
-const TEXT = "text/plain;charset=utf-8";
 
 /** Ré-encode une image (HEIC, TIFF…) en PNG via un canvas. */
 export async function convertToPng(blob: Blob): Promise<Blob> {
@@ -34,42 +30,7 @@ export async function convertToPng(blob: Blob): Promise<Blob> {
   );
 }
 
-/** Choisit ce qu'on envoie parmi les éléments du presse-papiers : l'image d'abord, sinon le texte. */
-export async function pickClip(items: readonly ItemLike[], toPng: (b: Blob) => Promise<Blob> = convertToPng): Promise<PhoneClip | null> {
-  for (const it of items) {
-    const type = it.types.find((t) => DIRECT_IMAGES.includes(t));
-    if (type) return { type, data: await it.getType(type) };
-  }
-  for (const it of items) {
-    const type = it.types.find((t) => t.startsWith("image/"));
-    if (type) return { type: "image/png", data: await toPng(await it.getType(type)) };
-  }
-  for (const it of items) {
-    if (!it.types.includes("text/plain")) continue;
-    const text = await (await it.getType("text/plain")).text();
-    if (text) return { type: TEXT, data: new Blob([text], { type: TEXT }) };
-  }
-  return null;
-}
-
-/**
- * Lit le presse-papiers du téléphone. À appeler directement dans le gestionnaire du tap :
- * `read()` est lancé avant tout `await`, sinon iOS refuse.
- */
-export async function readPhoneClipboard(clip: ClipboardLike = navigator.clipboard as unknown as ClipboardLike): Promise<PhoneClip | null> {
-  try {
-    if (clip.read) return await pickClip(await clip.read());
-    const text = await clip.readText();
-    return text ? { type: TEXT, data: new Blob([text], { type: TEXT }) } : null;
-  } catch (e) {
-    if (e instanceof Error && e.name === "NotAllowedError") {
-      throw new Error("Accès au presse-papiers refusé : touchez « Coller » dans la bulle de Safari.");
-    }
-    throw e instanceof Error ? e : new Error(String(e));
-  }
-}
-
-/** Image collée dans un champ (appui long › Coller) : pas de bulle de confirmation. */
+/** Image collée dans le champ (appui long › Coller). Null pour un collage de texte seul. */
 export function clipFromDataTransfer(dt: Pick<DataTransfer, "files" | "getData">): PhoneClip | null {
   for (const f of Array.from(dt.files)) {
     if (f.type.startsWith("image/")) return { type: f.type, data: f };
@@ -77,11 +38,17 @@ export function clipFromDataTransfer(dt: Pick<DataTransfer, "files" | "getData">
   return null;
 }
 
-/** Envoie le contenu au PC, qui le place dans son presse-papiers. Lève une erreur lisible. */
+/** Les formats que le PC ne décode pas (HEIC, TIFF…) sont ré-encodés en PNG sur le téléphone. */
+export async function toPcFormat(clip: PhoneClip, toPng: (b: Blob) => Promise<Blob> = convertToPng): Promise<PhoneClip> {
+  if (!clip.type.startsWith("image/") || DIRECT_IMAGES.includes(clip.type)) return clip;
+  return { type: "image/png", data: await toPng(clip.data) };
+}
+
+/** Envoie le contenu au PC, qui le colle (presse-papiers puis Ctrl+V). Lève une erreur lisible. */
 export async function sendClip(clip: PhoneClip, token: string, fetchFn: FetchLike = fetch): Promise<void> {
   let res: Response;
   try {
-    res = await fetchFn("/clipboard", {
+    res = await fetchFn("/paste", {
       method: "POST",
       headers: { "Content-Type": clip.type, Authorization: `Bearer ${token}` },
       body: clip.data,
@@ -98,12 +65,5 @@ export async function sendClip(clip: PhoneClip, token: string, fetchFn: FetchLik
   }
   if (message) throw new Error(message);
   if (res.status === 413) throw new Error("Contenu trop volumineux pour le PC.");
-  throw new Error(`Le PC a refusé le presse-papiers (${res.status}).`);
-}
-
-/** Absence minimale hors de l'app pour proposer l'envoi au retour (on est sans doute allé copier). */
-const AWAY_MIN_MS = 1000;
-
-export function shouldOfferOnReturn(enabled: boolean, hiddenAt: number, now: number): boolean {
-  return enabled && now - hiddenAt >= AWAY_MIN_MS;
+  throw new Error(`Le PC a refusé le collage (${res.status}).`);
 }

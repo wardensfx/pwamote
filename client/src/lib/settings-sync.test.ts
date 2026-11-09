@@ -7,7 +7,6 @@ const base = (): Settings => ({
   magnifier: { zoom: 2.5, follow: "smart", animation_ms: 220, caret_hold_ms: 1500 },
   keyboard: { sticky_modifiers: true },
   feedback: { haptics: true },
-  clipboard: { to_pc: false },
 });
 
 const invert = (s: Settings): Settings => ({ ...s, pointer: { ...s.pointer, invert_y: true } });

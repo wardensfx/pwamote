@@ -6,7 +6,7 @@ import { Keyboard } from "./Keyboard";
 import { Pad } from "./Pad";
 import { Recovery, RescueActions, useScanner } from "./Recovery";
 import { SettingsSheet } from "./Settings";
-import { CenterIcon, ClipboardIcon, DeckIcon, GearIcon, KeyboardIcon, LoupeIcon } from "./icons";
+import { CenterIcon, DeckIcon, GearIcon, KeyboardIcon, LoupeIcon } from "./icons";
 
 const Mark = () => (
   <div class="mark">
@@ -86,10 +86,6 @@ function Remote(props: { remote: RemoteController }) {
     const t = setTimeout(() => setStuck(true), 3000);
     onCleanup(() => clearTimeout(t));
   });
-  // Au retour dans l'app (après avoir copié ailleurs), proposer d'envoyer le presse-papiers.
-  const onVisibility = () => r.onVisibility(document.hidden);
-  document.addEventListener("visibilitychange", onVisibility);
-  onCleanup(() => document.removeEventListener("visibilitychange", onVisibility));
   const left = down("left");
   const right = down("right");
 
@@ -118,16 +114,6 @@ function Remote(props: { remote: RemoteController }) {
       </Show>
       <Show when={panel() === "actions"}>
         <ActionPanel remote={r} />
-      </Show>
-      <Show when={r.clipOffer() && !r.clipStatus()}>
-        <div class="glass toast clip-offer">
-          <button class="clip-send" onClick={() => void r.sendClipboard()}>
-            <ClipboardIcon /> Envoyer le presse-papiers
-          </button>
-          <button class="clip-close" aria-label="Ignorer" onClick={() => r.dismissClipOffer()}>
-            ×
-          </button>
-        </div>
       </Show>
       <Show when={r.clipStatus()}>
         {(c) => (

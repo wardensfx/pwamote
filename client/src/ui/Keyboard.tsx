@@ -1,9 +1,8 @@
-import { For, Show, onMount } from "solid-js";
+import { For, onMount } from "solid-js";
 import type { Key } from "../generated/Key";
 import type { Modifier } from "../generated/Modifier";
 import { clipFromDataTransfer } from "../lib/clipboard";
 import { diffText } from "../lib/text-diff";
-import { ClipboardIcon } from "./icons";
 import type { RemoteController } from "../lib/remote";
 
 const MODS: [Modifier, string][] = [
@@ -81,12 +80,11 @@ export function Keyboard(props: { remote: RemoteController }) {
         }}
         onInput={sync}
         onPaste={(e) => {
-          // Une image collée ici part dans le presse-papiers du PC ; un texte collé est tapé comme d'habitude.
-          if (!r.settings()?.clipboard.to_pc || !e.clipboardData) return;
-          const clip = clipFromDataTransfer(e.clipboardData);
+          // Un texte collé est tapé comme d'habitude ; une image est collée sur le PC (Ctrl+V).
+          const clip = e.clipboardData && clipFromDataTransfer(e.clipboardData);
           if (!clip) return;
           e.preventDefault();
-          void r.sendClip(clip);
+          void r.pasteOnPc(clip);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
@@ -134,11 +132,6 @@ export function Keyboard(props: { remote: RemoteController }) {
         >
           ⏎
         </button>
-        <Show when={r.settings()?.clipboard.to_pc}>
-          <button class="key clip-key" tabindex="-1" aria-label="Envoyer le presse-papiers au PC" onClick={() => void r.sendClipboard()}>
-            <ClipboardIcon />
-          </button>
-        </Show>
         <For each={KEYS}>
           {([k, label]) => (
             <button class="key" tabindex="-1" {...act(() => r.tap(k))}>

@@ -1,6 +1,6 @@
-//! Presse-papiers du téléphone vers le PC.
+//! Collage d'une image (ou d'un texte) depuis le champ texte du téléphone.
 //!
-//! Le téléphone envoie le contenu brut par `POST /clipboard` (texte ou image) ;
+//! Le téléphone envoie le contenu brut par `POST /paste` ;
 //! ce module le valide et le décode, indépendamment du système. L'écriture dans
 //! le presse-papiers passe par le port [`ClipboardSink`].
 

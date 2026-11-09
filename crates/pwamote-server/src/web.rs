@@ -18,7 +18,7 @@ use std::net::SocketAddr;
 
 use crate::actions::ActionJob;
 use crate::session::Session;
-use crate::state::{AppState, ClipboardRefusal};
+use crate::state::{AppState, PasteRefusal};
 use crate::tls::Pki;
 
 /// Taille maximale d'un message : largement assez pour des réglages ou du texte collé.
@@ -45,23 +45,18 @@ pub fn router(state: WebState) -> Router {
         .route("/pwamote.mobileconfig", get(mobileconfig))
         .route("/admin/pair", get(pair_page))
         .route(
-            "/clipboard",
-            post(clipboard_from_phone)
-                .layer(DefaultBodyLimit::max(crate::clipboard::MAX_BODY_BYTES)),
+            "/paste",
+            post(paste_from_phone).layer(DefaultBodyLimit::max(crate::clipboard::MAX_BODY_BYTES)),
         )
         .route("/healthz", get(|| async { "ok" }))
         .fallback(static_asset)
         .with_state(state)
 }
 
-/// Reçoit ce que le téléphone a copié (texte ou image, corps brut avec son `Content-Type`)
-/// et le place dans le presse-papiers du PC. Passe par HTTP plutôt que par le WebSocket :
+/// Reçoit ce qui a été collé dans le champ texte du téléphone (image ou texte, corps brut avec
+/// son `Content-Type`) et le colle sur le PC (presse-papiers + Ctrl+V). Passe par HTTP plutôt que par le WebSocket :
 /// une capture d'écran pèse plusieurs Mo et ne doit pas retarder les trames du pointeur.
-async fn clipboard_from_phone(
-    State(s): State<WebState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
+async fn paste_from_phone(State(s): State<WebState>, headers: HeaderMap, body: Bytes) -> Response {
     let header = |name| {
         headers
             .get(name)
@@ -77,25 +72,24 @@ async fn clipboard_from_phone(
     let content_type = header(header::CONTENT_TYPE);
     let app = s.app.clone();
     let result =
-        tokio::task::spawn_blocking(move || app.clipboard_from_phone(&token, &content_type, &body))
+        tokio::task::spawn_blocking(move || app.paste_from_phone(&token, &content_type, &body))
             .await
-            .unwrap_or_else(|e| Err(ClipboardRefusal::System(e.to_string())));
+            .unwrap_or_else(|e| Err(PasteRefusal::System(e.to_string())));
     let (status, message) = match result {
         Ok(()) => (StatusCode::OK, None),
         Err(e) => {
             let status = match &e {
-                ClipboardRefusal::Unauthorized => StatusCode::UNAUTHORIZED,
-                ClipboardRefusal::Disabled => StatusCode::FORBIDDEN,
-                ClipboardRefusal::Invalid(crate::clipboard::ClipboardError::TooLarge) => {
+                PasteRefusal::Unauthorized => StatusCode::UNAUTHORIZED,
+                PasteRefusal::Invalid(crate::clipboard::ClipboardError::TooLarge) => {
                     StatusCode::PAYLOAD_TOO_LARGE
                 }
-                ClipboardRefusal::Invalid(crate::clipboard::ClipboardError::Unsupported(_)) => {
+                PasteRefusal::Invalid(crate::clipboard::ClipboardError::Unsupported(_)) => {
                     StatusCode::UNSUPPORTED_MEDIA_TYPE
                 }
-                ClipboardRefusal::Invalid(_) => StatusCode::BAD_REQUEST,
-                ClipboardRefusal::System(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                PasteRefusal::Invalid(_) => StatusCode::BAD_REQUEST,
+                PasteRefusal::System(_) => StatusCode::INTERNAL_SERVER_ERROR,
             };
-            tracing::warn!(error = %e, "presse-papiers du téléphone refusé");
+            tracing::warn!(error = %e, "collage du téléphone refusé");
             (status, Some(e.to_string()))
         }
     };

@@ -25,7 +25,7 @@ flowchart LR
     CORE["pwamote-core<br/>pointeur · loupe · réglages · appairage"]
     IN["InputSink<br/>SendInput"]
     MAG["MagnifierSink<br/>API Magnification"]
-    CLIP["ClipboardSink<br/>presse-papiers (arboard)"]
+    CLIP["ClipboardSink<br/>presse-papiers (arboard)<br/>puis Ctrl+V"]
     ACT["Actions<br/>touches · programmes · ouvertures"]
     ST["AppState<br/>réglages + appareils (JSON)"]
     WEB --> SES --> CORE
@@ -33,11 +33,11 @@ flowchart LR
     SES --> MAG
     SES --> ACT
     SES <--> ST
-    WEB -- "POST /clipboard" --> CLIP
+    WEB -- "POST /paste" --> CLIP
   end
 
   CONN <== "wss://pwamote-pc.local:8443/ws<br/>JSON (contrôle) + binaire (capteurs)" ==> WEB
-  UI -. "https://…/clipboard<br/>texte ou image" .-> WEB
+  UI -. "https://…/paste<br/>image collée" .-> WEB
   MDNS(("mDNS<br/>_pwamote._tcp")) -.-> Phone
   WEB -.annonce.-> MDNS
 ```
@@ -275,7 +275,7 @@ Les réglages sont validés et ramenés dans des plages sûres côté serveur (`
 | téléphone → PC | JSON | `hello`, `pair`, `button`, `key_tap`, `key`, `modifier`, `text`, `clutch`, `recenter`, `magnifier`, `update_settings`, `run_action`, `ping` |
 | téléphone → PC | binaire | `0x01` mouvement (7 × f32), `0x02` trackpad (2 × f32), `0x03` défilement (2 × f32), `0x04` accélération linéaire pour l'option « déplacements du téléphone » (4 × f32), little-endian |
 | PC → téléphone | JSON | `paired`, `welcome`, `deck`, `settings`, `magnifier_state`, `action_result`, `error`, `pong` |
-| téléphone → PC | HTTPS `POST /clipboard` | texte ou image brut, jeton d'appareil en `Authorization: Bearer` (voir « Presse-papiers ») |
+| téléphone → PC | HTTPS `POST /paste` | image (ou texte) brute collée dans le champ du clavier, jeton d'appareil en `Authorization: Bearer` ; le PC la colle avec Ctrl+V |
 
 Garanties de sécurité côté serveur :
 
@@ -284,39 +284,34 @@ Garanties de sécurité côté serveur :
 - les doubles « appui » sont ignorés (seules les vraies transitions partent) ;
 - taille de message limitée à 64 Ko, trames binaires invalides ignorées.
 
-## Presse-papiers du téléphone vers le PC
+## Coller une image depuis le téléphone
 
-Option **Réglages › Presse-papiers › Copier du téléphone vers le PC** (réglage synchronisé `clipboard.to_pc`, désactivé par défaut). Ce qui est copié sur le téléphone, **texte ou image**, arrive dans le presse-papiers de Windows : il suffit de faire Ctrl+V sur le PC.
+Dans le champ du clavier, un **texte** collé est tapé sur le PC comme le reste de la saisie. Une **image** collée (appui long › Coller) ne peut pas entrer dans un champ texte : elle est interceptée et **collée sur le PC**, comme si on avait fait Ctrl+V là-bas. Aucun réglage, et pas de synchronisation des presse-papiers dans un sens ou dans l'autre.
 
-Contraintes d'iOS/Safari, qui dictent l'interface :
-
-- une page web ne peut **pas** surveiller le presse-papiers : `navigator.clipboard.read()` n'est permis que pendant un tap de l'utilisateur, sur HTTPS (déjà le cas) ;
-- quand le contenu vient d'une autre app, Safari affiche une bulle **« Coller »** à toucher pour confirmer ; c'est imposé par iOS et non contournable ;
-- un collage classique dans un champ (appui long › Coller) donne accès au contenu sans cette bulle.
-
-D'où trois façons d'envoyer, toutes d'un tap :
+Le collage dans un champ donne accès à l'image sans la bulle « Coller » qu'iOS impose à `navigator.clipboard.read()`.
 
 ```mermaid
-flowchart TD
-  A["Copier dans une autre app<br/>(Photos, Safari, Notes…)"] --> B["Revenir dans PwaMote"]
-  B --> C{"option activée<br/>et absent ≥ 1 s ?"}
-  C -- oui --> D["Bandeau « Envoyer le presse-papiers »<br/>pendant 8 s"]
-  D -- tap --> R["navigator.clipboard.read()<br/>+ bulle « Coller » d'iOS"]
-  K["Bouton presse-papiers du clavier<br/>ou bouton des réglages"] -- tap --> R
-  P["Image collée dans le champ du clavier"] --> I["clipboardData (sans bulle)"]
-  R --> X{"contenu"}
-  X -- "image PNG/JPEG/GIF/WebP/BMP" --> S
-  X -- "autre image (HEIC…)" --> V["ré-encodée en PNG<br/>sur le téléphone"] --> S
-  X -- texte --> S
-  I --> S["POST /clipboard<br/>Authorization: Bearer jeton<br/>Content-Type: type du contenu<br/>corps brut"]
-  S --> W{"jeton valide ?<br/>option activée ?"}
-  W -- non --> E["401 / 403 + message"]
-  W -- oui --> DEC["décodage (crate image)<br/>limites : 40 Mo, 16 384 px de côté"]
-  DEC --> WIN["arboard : CF_UNICODETEXT (CRLF)<br/>ou image DIB + PNG (transparence)"]
-  WIN --> OK["200 → « Image copiée sur le PC · Ctrl+V »"]
+sequenceDiagram
+  participant U as Utilisateur
+  participant K as Champ du clavier (PWA)
+  participant S as Serveur (POST /paste)
+  participant W as Windows
+
+  U->>K: appui long › Coller (image)
+  K->>K: clipboardData.files → image<br/>HEIC/TIFF… ré-encodés en PNG
+  K->>S: POST /paste<br/>Authorization: Bearer jeton<br/>Content-Type: image/png, corps brut
+  alt jeton inconnu
+    S-->>K: 401
+  else image illisible ou trop grande (40 Mo, 16 384 px)
+    S-->>K: 400 / 413 + message
+  else
+    S->>W: presse-papiers : image DIB + PNG (arboard)
+    S->>W: Ctrl+V (SendInput)
+    S-->>K: 200 → « Image collée sur le PC »
+  end
 ```
 
-Pourquoi une requête HTTP plutôt que le WebSocket : une capture d'écran d'iPhone pèse plusieurs Mo, bien au-delà de la limite de 64 Ko des messages, et elle ne doit pas retarder les trames du gyroscope. La requête est authentifiée avec le même jeton d'appareil que la session, et le décodage tourne hors de la boucle async (`spawn_blocking`).
+Pourquoi une requête HTTP plutôt que le WebSocket : une capture d'écran d'iPhone pèse plusieurs Mo, bien au-delà de la limite de 64 Ko des messages, et elle ne doit pas retarder les trames du gyroscope. La requête est authentifiée avec le même jeton d'appareil que la session, et le décodage tourne hors de la boucle async (`spawn_blocking`). L'image remplace le contenu du presse-papiers du PC.
 
 ## Actions programmables
 

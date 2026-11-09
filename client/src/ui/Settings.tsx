@@ -110,17 +110,6 @@ export function SettingsSheet(props: { remote: RemoteController; onClose: () => 
                 <p class="note">Intelligent : la loupe suit la zone de texte pendant la frappe, puis revient au curseur.</p>
               </div>
 
-              <h3>Presse-papiers</h3>
-              <Toggle label="Copier du téléphone vers le PC" checked={cfg().clipboard.to_pc} onChange={(to_pc) => set((x) => ({ ...x, clipboard: { to_pc } }), "clipboard.to_pc")} />
-              <Show when={cfg().clipboard.to_pc}>
-                <div class="row">
-                  <button class="btn ghost small" onClick={() => void r.sendClipboard()}>
-                    Envoyer le presse-papiers maintenant
-                  </button>
-                </div>
-                <p class="note">Texte ou image copiés sur le téléphone vont dans le presse-papiers du PC (Ctrl+V). iOS n'autorise la lecture que sur un tap : l'envoi vous est proposé en revenant dans l'app, et le bouton presse-papiers du clavier l'envoie à tout moment. Une image collée dans le champ du clavier part aussi directement.</p>
-              </Show>
-
               <h3>Clavier et retour</h3>
               <Toggle label="Modificateurs collants" checked={cfg().keyboard.sticky_modifiers} onChange={(sticky_modifiers) => set((x) => ({ ...x, keyboard: { sticky_modifiers } }), "keyboard.sticky")} />
               <Toggle label="Retour haptique" checked={cfg().feedback.haptics} onChange={(haptics) => set((x) => ({ ...x, feedback: { haptics } }), "feedback.haptics")} />

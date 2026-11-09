@@ -129,16 +129,6 @@ impl Default for FeedbackSettings {
     }
 }
 
-/// Partage du presse-papiers entre le téléphone et le PC.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
-#[serde(default)]
-#[ts(export)]
-pub struct ClipboardSettings {
-    /// Ce qui est copié sur le téléphone (texte ou image) peut être placé dans le presse-papiers du PC.
-    /// Désactivé par défaut : le PC refuse alors tout envoi.
-    pub to_pc: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(default)]
 #[ts(export)]
@@ -147,7 +137,6 @@ pub struct Settings {
     pub magnifier: MagnifierSettings,
     pub keyboard: KeyboardSettings,
     pub feedback: FeedbackSettings,
-    pub clipboard: ClipboardSettings,
 }
 
 fn clamp_finite(v: f32, min: f32, max: f32, fallback: f32) -> f32 {
@@ -349,12 +338,12 @@ mod tests {
     }
 
     #[test]
-    fn clipboard_sharing_is_off_by_default_and_survives_old_files() {
-        assert!(!Settings::default().clipboard.to_pc);
-        let s: Settings = serde_json::from_str(r#"{"clipboard":{"to_pc":true}}"#).unwrap();
-        assert!(s.clipboard.to_pc);
-        let old: Settings = serde_json::from_str(r#"{"pointer":{}}"#).unwrap();
-        assert!(!old.clipboard.to_pc);
+    fn settings_files_from_older_versions_with_unknown_sections_still_load() {
+        // `clipboard` a existé brièvement (2026-11-09) avant d'être retiré.
+        let s: Settings =
+            serde_json::from_str(r#"{"clipboard":{"to_pc":true},"pointer":{"invert_y":true}}"#)
+                .unwrap();
+        assert!(s.pointer.invert_y);
     }
 
     #[test]

@@ -162,13 +162,11 @@ pub struct Sinks {
     pub clipboard: Arc<dyn ClipboardSink>,
 }
 
-/// Pourquoi un envoi du presse-papiers du téléphone a été refusé.
+/// Pourquoi un collage depuis le téléphone a été refusé.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum ClipboardRefusal {
+pub enum PasteRefusal {
     #[error("appareil inconnu, appairez-le de nouveau")]
     Unauthorized,
-    #[error("le partage du presse-papiers est désactivé dans les réglages")]
-    Disabled,
     #[error(transparent)]
     Invalid(#[from] ClipboardError),
     #[error("{0}")]
@@ -390,25 +388,25 @@ impl AppState {
         Ok((id, token))
     }
 
-    /// Place dans le presse-papiers du PC ce qu'un téléphone appairé a copié.
+    /// Colle sur le PC ce qui a été collé dans le champ texte du téléphone (une image, typiquement) :
+    /// le contenu passe par le presse-papiers de Windows, puis Ctrl+V est envoyé.
     /// Bloquant (décodage d'image, accès au presse-papiers) : à appeler hors de la boucle async.
-    pub fn clipboard_from_phone(
+    pub fn paste_from_phone(
         &self,
         token: &str,
         content_type: &str,
         body: &[u8],
-    ) -> Result<(), ClipboardRefusal> {
-        let device = self
-            .authenticate(token)
-            .ok_or(ClipboardRefusal::Unauthorized)?;
-        if !self.settings().settings.clipboard.to_pc {
-            return Err(ClipboardRefusal::Disabled);
-        }
+    ) -> Result<(), PasteRefusal> {
+        let device = self.authenticate(token).ok_or(PasteRefusal::Unauthorized)?;
         let content = crate::clipboard::decode(content_type, body)?;
-        self.clipboard
-            .set(&content)
-            .map_err(ClipboardRefusal::System)?;
-        tracing::info!(device = %device.name, "presse-papiers reçu du téléphone");
+        self.clipboard.set(&content).map_err(PasteRefusal::System)?;
+        let v = pwamote_core::protocol::Key::Char('v');
+        let ctrl = pwamote_core::protocol::Modifier::Ctrl;
+        self.input.modifier(ctrl, true);
+        self.input.key(v, true);
+        self.input.key(v, false);
+        self.input.modifier(ctrl, false);
+        tracing::info!(device = %device.name, "collage reçu du téléphone");
         Ok(())
     }
 
@@ -589,63 +587,56 @@ mod tests {
         f.state.pair(&code, "iPhone").unwrap().1
     }
 
-    fn enable_clipboard(f: &super::testing::Fixture) {
-        let mut s = f.state.settings().settings;
-        s.clipboard.to_pc = true;
-        let rev = f.state.settings().rev;
-        f.state.update_settings(rev, s).unwrap();
+    fn ctrl_v() -> Vec<super::testing::Event> {
+        use super::testing::Event;
+        use pwamote_core::protocol::{Key, Modifier};
+        vec![
+            Event::Modifier(Modifier::Ctrl, true),
+            Event::Key(Key::Char('v'), true),
+            Event::Key(Key::Char('v'), false),
+            Event::Modifier(Modifier::Ctrl, false),
+        ]
     }
 
     #[test]
-    fn clipboard_from_phone_is_refused_while_the_option_is_off() {
+    fn paste_from_phone_needs_a_known_device() {
         let f = fixture();
-        let token = paired_token(&f);
         assert_eq!(
-            f.state.clipboard_from_phone(&token, "text/plain", b"hello"),
-            Err(ClipboardRefusal::Disabled)
+            f.state.paste_from_phone("faux", "text/plain", b"hello"),
+            Err(PasteRefusal::Unauthorized)
         );
         assert!(f.clipboard.take().is_empty());
+        assert!(f.input.take().is_empty());
     }
 
     #[test]
-    fn clipboard_from_phone_needs_a_known_device() {
+    fn paste_from_phone_fills_the_clipboard_then_presses_ctrl_v() {
         let f = fixture();
-        enable_clipboard(&f);
-        assert_eq!(
-            f.state.clipboard_from_phone("faux", "text/plain", b"hello"),
-            Err(ClipboardRefusal::Unauthorized)
-        );
-        assert!(f.clipboard.take().is_empty());
-    }
-
-    #[test]
-    fn clipboard_from_phone_reaches_the_system_clipboard() {
-        let f = fixture();
-        enable_clipboard(&f);
         let token = paired_token(&f);
         f.state
-            .clipboard_from_phone(&token, "text/plain;charset=utf-8", "salut".as_bytes())
+            .paste_from_phone(&token, "text/plain;charset=utf-8", "salut".as_bytes())
             .unwrap();
         assert_eq!(
             f.clipboard.take(),
             vec![ClipboardContent::Text("salut".into())]
         );
+        assert_eq!(f.input.take(), ctrl_v());
     }
 
     #[test]
-    fn clipboard_from_phone_reports_bad_content_and_system_failures() {
+    fn paste_from_phone_does_not_press_ctrl_v_when_something_fails() {
         let f = fixture();
-        enable_clipboard(&f);
         let token = paired_token(&f);
         assert!(matches!(
-            f.state.clipboard_from_phone(&token, "image/png", b"nope"),
-            Err(ClipboardRefusal::Invalid(_))
+            f.state.paste_from_phone(&token, "image/png", b"nope"),
+            Err(PasteRefusal::Invalid(_))
         ));
         *f.clipboard.fail.lock().unwrap() = Some("presse-papiers occupé".into());
         assert_eq!(
-            f.state.clipboard_from_phone(&token, "text/plain", b"x"),
-            Err(ClipboardRefusal::System("presse-papiers occupé".into()))
+            f.state.paste_from_phone(&token, "text/plain", b"x"),
+            Err(PasteRefusal::System("presse-papiers occupé".into()))
         );
+        assert!(f.input.take().is_empty());
     }
 
     #[test]

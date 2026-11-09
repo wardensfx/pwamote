@@ -385,27 +385,13 @@ async fn http(base: &str, head: &str, body: &[u8]) -> (u16, String) {
 }
 
 #[tokio::test]
-async fn phone_clipboard_reaches_the_pc_only_when_enabled_and_authenticated() {
-    let (url, app, _rec) = boot().await;
+async fn pasting_on_the_phone_pastes_on_the_pc_for_authenticated_devices() {
+    let (url, app, rec) = boot().await;
     let base = url.replace("ws://", "").replace("/ws", "");
     let (_ws, token) = pair(&url, &app).await;
     let post = |auth: String| {
-        format!("POST /clipboard HTTP/1.1\r\nContent-Type: text/plain;charset=utf-8{auth}")
+        format!("POST /paste HTTP/1.1\r\nContent-Type: text/plain;charset=utf-8{auth}")
     };
-
-    // Option désactivée par défaut.
-    let (code, body) = http(
-        &base,
-        &post(format!("\r\nAuthorization: Bearer {token}")),
-        b"salut",
-    )
-    .await;
-    assert_eq!(code, 403, "{body}");
-    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["ok"], false);
-
-    let mut s = app.settings().settings;
-    s.clipboard.to_pc = true;
-    app.update_settings(app.settings().rev, s).unwrap();
 
     let (code, _) = http(&base, &post(String::new()), b"salut").await;
     assert_eq!(code, 401, "sans jeton");
@@ -416,6 +402,7 @@ async fn phone_clipboard_reaches_the_pc_only_when_enabled_and_authenticated() {
     )
     .await;
     assert_eq!(code, 401, "jeton inconnu");
+    rec.0.lock().unwrap().clear();
 
     let (code, body) = http(
         &base,
@@ -425,11 +412,17 @@ async fn phone_clipboard_reaches_the_pc_only_when_enabled_and_authenticated() {
     .await;
     assert_eq!(code, 200, "{body}");
     assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["ok"], true);
+    // Le contenu est dans le presse-papiers, puis Ctrl+V le colle.
+    let log = rec.0.lock().unwrap().join(" | ");
+    assert!(
+        log.contains("mod Ctrl true") && log.contains("Char('v')"),
+        "{log}"
+    );
 
     let (code, body) = http(
         &base,
         &format!(
-            "POST /clipboard HTTP/1.1\r\nContent-Type: image/png\r\nAuthorization: Bearer {token}"
+            "POST /paste HTTP/1.1\r\nContent-Type: image/png\r\nAuthorization: Bearer {token}"
         ),
         b"pas une image",
     )
@@ -442,19 +435,16 @@ async fn phone_clipboard_reaches_the_pc_only_when_enabled_and_authenticated() {
 }
 
 #[tokio::test]
-async fn phone_clipboard_accepts_screenshots_bigger_than_a_websocket_message() {
+async fn paste_accepts_screenshots_bigger_than_a_websocket_message() {
     let (url, app, _rec) = boot().await;
     let base = url.replace("ws://", "").replace("/ws", "");
     let (_ws, token) = pair(&url, &app).await;
-    let mut s = app.settings().settings;
-    s.clipboard.to_pc = true;
-    app.update_settings(app.settings().rev, s).unwrap();
-    // ~3 Mo de texte : bien plus que la limite d'un message WebSocket.
+    // ~3 Mo : bien plus que la limite d'un message WebSocket.
     let big = "a".repeat(3 * 1024 * 1024);
     let (code, body) = http(
         &base,
         &format!(
-            "POST /clipboard HTTP/1.1\r\nContent-Type: text/plain\r\nAuthorization: Bearer {token}"
+            "POST /paste HTTP/1.1\r\nContent-Type: text/plain\r\nAuthorization: Bearer {token}"
         ),
         big.as_bytes(),
     )
