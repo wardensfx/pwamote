@@ -75,3 +75,5 @@ Trunk-based development : branches courtes, intégration fréquente dans `main`,
 | Application de bureau : fenêtre, barre système, démarrage avec Windows, choix de l'adresse du QR | écrite, interface vérifiée dans un navigateur, à valider sur Windows |
 | Actions programmables : modèle, validation, protocole, panneau du téléphone, éditeur | fait, testé (bout en bout avec faux système) ; panneau et éditeur vérifiés dans un navigateur |
 | Actions : lancement de programmes, ouverture (`ShellExecuteW`), touches avec code de balayage | écrit, compilé pour Windows, à valider sur Windows |
+| Gyro continu : la surface centrale fait clic gauche, appui maintenu et molette | fait, testé, vérifié dans un navigateur émulant un iPhone |
+| Presse-papiers téléphone → PC (texte, images) : option, bandeau au retour, route `/clipboard` | fait, testé de bout en bout ; écriture Windows (`arboard`) compilée, à valider sur Windows et iPhone |

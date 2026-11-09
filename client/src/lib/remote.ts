@@ -7,6 +7,7 @@ import type { Modifier } from "../generated/Modifier";
 import type { MouseButton } from "../generated/MouseButton";
 import type { ServerMessage } from "../generated/ServerMessage";
 import type { Settings } from "../generated/Settings";
+import { readPhoneClipboard, sendClip, shouldOfferOnReturn, type PhoneClip } from "./clipboard";
 import { Connection, PROTOCOL_VERSION, type ConnectionStatus } from "./connection";
 import { encodeLinear, encodeMotion, encodeScroll, encodeTrackpad } from "./frames";
 import { haptic } from "./haptics";
@@ -19,6 +20,9 @@ import type { Values } from "./actions";
 
 /** État visible d'un bouton d'action juste après un appui. */
 export type ActionState = "running" | "ok" | "error";
+
+/** Bandeau d'état d'un envoi du presse-papiers vers le PC. */
+export type ClipStatus = { state: "sending" | "ok" | "error"; message: string };
 
 export type Phase = "needs-pairing" | "connecting" | "ready" | "offline" | "rejected";
 
@@ -46,6 +50,11 @@ export class RemoteController {
   private actionErrorSig = createSignal<string | null>(null);
   private actionTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private actionErrorTimer: ReturnType<typeof setTimeout> | null = null;
+  private clipSig = createSignal<ClipStatus | null>(null);
+  private clipOfferSig = createSignal(false);
+  private clipTimer: ReturnType<typeof setTimeout> | null = null;
+  private clipOfferTimer: ReturnType<typeof setTimeout> | null = null;
+  private hiddenAt = 0;
 
   private sync = new SettingsSync((s) => {
     this.settingsSig[1](s);
@@ -64,6 +73,9 @@ export class RemoteController {
   readonly deck = () => this.deckSig[0]();
   readonly actionStates = () => this.actionStatesSig[0]();
   readonly actionError = () => this.actionErrorSig[0]();
+  readonly clipStatus = () => this.clipSig[0]();
+  /** Proposer d'envoyer le presse-papiers (on revient dans l'app, sans doute après avoir copié). */
+  readonly clipOffer = () => this.clipOfferSig[0]();
 
   get paired(): boolean {
     return this.identity !== null;
@@ -260,6 +272,67 @@ export class RemoteController {
     if (this.actionErrorTimer) clearTimeout(this.actionErrorTimer);
     this.actionErrorSig[1](message);
     this.actionErrorTimer = setTimeout(() => this.actionErrorSig[1](null), 4000);
+  }
+
+  // ----- Presse-papiers vers le PC -----
+
+  /**
+   * Lit le presse-papiers du téléphone et l'envoie au PC. À appeler directement depuis un tap :
+   * la lecture démarre avant tout `await`, comme l'exige iOS.
+   */
+  sendClipboard(): Promise<void> {
+    return this.deliverClip(readPhoneClipboard());
+  }
+
+  /** Envoie un contenu déjà obtenu (image collée dans un champ). */
+  sendClip(clip: PhoneClip): Promise<void> {
+    return this.deliverClip(Promise.resolve(clip));
+  }
+
+  /** À brancher sur `visibilitychange` : au retour dans l'app, propose l'envoi quelques secondes. */
+  onVisibility(hidden: boolean, now: number = Date.now()): void {
+    if (hidden) {
+      this.hiddenAt = now;
+      this.clipOfferSig[1](false);
+      return;
+    }
+    const enabled = (this.settings()?.clipboard.to_pc ?? false) && this.phase() === "ready";
+    if (!shouldOfferOnReturn(enabled, this.hiddenAt, now)) return;
+    this.clipOfferSig[1](true);
+    if (this.clipOfferTimer) clearTimeout(this.clipOfferTimer);
+    this.clipOfferTimer = setTimeout(() => this.clipOfferSig[1](false), 8000);
+  }
+
+  dismissClipOffer(): void {
+    this.clipOfferSig[1](false);
+  }
+
+  private async deliverClip(reading: Promise<PhoneClip | null>): Promise<void> {
+    this.clipOfferSig[1](false);
+    const token = this.identity?.token;
+    if (!token) return;
+    this.clipSig[1]({ state: "sending", message: "Envoi au PC…" });
+    this.setClipTimer(30_000, () => this.clipSig[1](null));
+    try {
+      const clip = await reading;
+      if (!clip) throw new Error("Le presse-papiers du téléphone est vide.");
+      await sendClip(clip, token);
+      this.hapticIf("tap");
+      const what = clip.type.startsWith("image/") ? "Image copiée" : "Texte copié";
+      this.clipSig[1]({ state: "ok", message: `${what} sur le PC · Ctrl+V` });
+      this.setClipTimer(2200, () => this.clipSig[1](null));
+    } catch (e) {
+      this.clipSig[1]({ state: "error", message: e instanceof Error ? e.message : String(e) });
+      this.setClipTimer(4500, () => this.clipSig[1](null));
+    }
+  }
+
+  private setClipTimer(ms: number, fn: () => void): void {
+    if (this.clipTimer) clearTimeout(this.clipTimer);
+    this.clipTimer = setTimeout(() => {
+      this.clipTimer = null;
+      fn();
+    }, ms);
   }
 
   // ----- Gyroscope -----

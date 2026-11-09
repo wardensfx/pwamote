@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod bootstrap;
+pub mod clipboard;
 pub mod config;
 pub mod firewall;
 pub mod input;

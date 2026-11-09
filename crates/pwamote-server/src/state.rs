@@ -12,6 +12,7 @@ use rand::Rng as _;
 use tokio::sync::broadcast;
 
 use crate::actions::{ActionJob, Launcher, MAX_CONCURRENT_ACTIONS};
+use crate::clipboard::{ClipboardError, ClipboardSink};
 use crate::config::AppConfig;
 use crate::input::{InputSink, MagnifierSink};
 
@@ -153,11 +154,25 @@ struct Shared {
     deck: Deck,
 }
 
-/// Les ports vers le système : saisie, loupe, programmes.
+/// Les ports vers le système : saisie, loupe, programmes, presse-papiers.
 pub struct Sinks {
     pub input: Arc<dyn InputSink>,
     pub magnifier: Arc<dyn MagnifierSink>,
     pub launcher: Arc<dyn Launcher>,
+    pub clipboard: Arc<dyn ClipboardSink>,
+}
+
+/// Pourquoi un envoi du presse-papiers du téléphone a été refusé.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ClipboardRefusal {
+    #[error("appareil inconnu, appairez-le de nouveau")]
+    Unauthorized,
+    #[error("le partage du presse-papiers est désactivé dans les réglages")]
+    Disabled,
+    #[error(transparent)]
+    Invalid(#[from] ClipboardError),
+    #[error("{0}")]
+    System(String),
 }
 
 pub struct AppState {
@@ -166,6 +181,7 @@ pub struct AppState {
     pub input: Arc<dyn InputSink>,
     pub magnifier: Arc<dyn MagnifierSink>,
     pub launcher: Arc<dyn Launcher>,
+    pub clipboard: Arc<dyn ClipboardSink>,
     settings_tx: broadcast::Sender<VersionedSettings>,
     revoked_tx: broadcast::Sender<String>,
     deck_tx: broadcast::Sender<DeckView>,
@@ -210,6 +226,7 @@ impl AppState {
             input: sinks.input,
             magnifier: sinks.magnifier,
             launcher: sinks.launcher,
+            clipboard: sinks.clipboard,
             settings_tx,
             revoked_tx,
             deck_tx,
@@ -373,6 +390,28 @@ impl AppState {
         Ok((id, token))
     }
 
+    /// Place dans le presse-papiers du PC ce qu'un téléphone appairé a copié.
+    /// Bloquant (décodage d'image, accès au presse-papiers) : à appeler hors de la boucle async.
+    pub fn clipboard_from_phone(
+        &self,
+        token: &str,
+        content_type: &str,
+        body: &[u8],
+    ) -> Result<(), ClipboardRefusal> {
+        let device = self
+            .authenticate(token)
+            .ok_or(ClipboardRefusal::Unauthorized)?;
+        if !self.settings().settings.clipboard.to_pc {
+            return Err(ClipboardRefusal::Disabled);
+        }
+        let content = crate::clipboard::decode(content_type, body)?;
+        self.clipboard
+            .set(&content)
+            .map_err(ClipboardRefusal::System)?;
+        tracing::info!(device = %device.name, "presse-papiers reçu du téléphone");
+        Ok(())
+    }
+
     pub fn authenticate(&self, token: &str) -> Option<Device> {
         self.lock()
             .registry
@@ -402,6 +441,7 @@ impl AppState {
 pub mod testing {
     use super::*;
     use crate::actions::testing::FakeLauncher;
+    use crate::clipboard::ClipboardContent;
     use crate::input::{apply_action, MagnifierStatus};
     use pwamote_core::magnifier::MagnifierController;
     use pwamote_core::pointer::WheelDelta;
@@ -473,17 +513,42 @@ pub mod testing {
         }
     }
 
+    #[derive(Default)]
+    pub struct FakeClipboard {
+        pub contents: Mutex<Vec<ClipboardContent>>,
+        /// Erreur à renvoyer au prochain envoi, pour simuler un presse-papiers verrouillé.
+        pub fail: Mutex<Option<String>>,
+    }
+
+    impl FakeClipboard {
+        pub fn take(&self) -> Vec<ClipboardContent> {
+            std::mem::take(&mut *self.contents.lock().unwrap())
+        }
+    }
+
+    impl ClipboardSink for FakeClipboard {
+        fn set(&self, content: &ClipboardContent) -> Result<(), String> {
+            if let Some(e) = self.fail.lock().unwrap().take() {
+                return Err(e);
+            }
+            self.contents.lock().unwrap().push(content.clone());
+            Ok(())
+        }
+    }
+
     pub struct Fixture {
         pub state: Arc<AppState>,
         pub input: Arc<FakeInput>,
         pub persist: Arc<MemoryPersist>,
         pub launcher: Arc<FakeLauncher>,
+        pub clipboard: Arc<FakeClipboard>,
     }
 
     pub fn fixture() -> Fixture {
         let input = Arc::new(FakeInput::default());
         let persist = Arc::new(MemoryPersist::default());
         let launcher = Arc::new(FakeLauncher::default());
+        let clipboard = Arc::new(FakeClipboard::default());
         let magnifier = Arc::new(FakeMagnifier(Mutex::new(MagnifierController::new(
             &MagnifierSettings::default(),
         ))));
@@ -499,6 +564,7 @@ pub mod testing {
                 input: input.clone(),
                 magnifier,
                 launcher: launcher.clone(),
+                clipboard: clipboard.clone(),
             },
             "Test PC".into(),
         );
@@ -507,6 +573,7 @@ pub mod testing {
             input,
             persist,
             launcher,
+            clipboard,
         }
     }
 }
@@ -515,6 +582,71 @@ pub mod testing {
 mod tests {
     use super::testing::fixture;
     use super::*;
+    use crate::clipboard::ClipboardContent;
+
+    fn paired_token(f: &super::testing::Fixture) -> String {
+        let code = f.state.new_pairing_code();
+        f.state.pair(&code, "iPhone").unwrap().1
+    }
+
+    fn enable_clipboard(f: &super::testing::Fixture) {
+        let mut s = f.state.settings().settings;
+        s.clipboard.to_pc = true;
+        let rev = f.state.settings().rev;
+        f.state.update_settings(rev, s).unwrap();
+    }
+
+    #[test]
+    fn clipboard_from_phone_is_refused_while_the_option_is_off() {
+        let f = fixture();
+        let token = paired_token(&f);
+        assert_eq!(
+            f.state.clipboard_from_phone(&token, "text/plain", b"hello"),
+            Err(ClipboardRefusal::Disabled)
+        );
+        assert!(f.clipboard.take().is_empty());
+    }
+
+    #[test]
+    fn clipboard_from_phone_needs_a_known_device() {
+        let f = fixture();
+        enable_clipboard(&f);
+        assert_eq!(
+            f.state.clipboard_from_phone("faux", "text/plain", b"hello"),
+            Err(ClipboardRefusal::Unauthorized)
+        );
+        assert!(f.clipboard.take().is_empty());
+    }
+
+    #[test]
+    fn clipboard_from_phone_reaches_the_system_clipboard() {
+        let f = fixture();
+        enable_clipboard(&f);
+        let token = paired_token(&f);
+        f.state
+            .clipboard_from_phone(&token, "text/plain;charset=utf-8", "salut".as_bytes())
+            .unwrap();
+        assert_eq!(
+            f.clipboard.take(),
+            vec![ClipboardContent::Text("salut".into())]
+        );
+    }
+
+    #[test]
+    fn clipboard_from_phone_reports_bad_content_and_system_failures() {
+        let f = fixture();
+        enable_clipboard(&f);
+        let token = paired_token(&f);
+        assert!(matches!(
+            f.state.clipboard_from_phone(&token, "image/png", b"nope"),
+            Err(ClipboardRefusal::Invalid(_))
+        ));
+        *f.clipboard.fail.lock().unwrap() = Some("presse-papiers occupé".into());
+        assert_eq!(
+            f.state.clipboard_from_phone(&token, "text/plain", b"x"),
+            Err(ClipboardRefusal::System("presse-papiers occupé".into()))
+        );
+    }
 
     #[test]
     fn pairing_persists_the_device_and_authenticates_it() {

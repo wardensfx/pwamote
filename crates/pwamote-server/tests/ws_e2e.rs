@@ -9,6 +9,7 @@ use pwamote_core::pointer::WheelDelta;
 use pwamote_core::protocol::{Key, MagnifierAction, Modifier, MouseButton};
 use pwamote_core::settings::{MagnifierSettings, Settings, VersionedSettings};
 use pwamote_server::actions::Launcher;
+use pwamote_server::clipboard::LogClipboard;
 use pwamote_server::input::{InputSink, LogMagnifier};
 use pwamote_server::state::{AppState, MemoryPersist, Sinks};
 use pwamote_server::tls::Pki;
@@ -72,6 +73,7 @@ async fn boot() -> (String, Arc<AppState>, Arc<Recorder>) {
             input: rec.clone(),
             magnifier: Arc::new(LogMagnifier::new(&MagnifierSettings::default())),
             launcher: rec.clone(),
+            clipboard: Arc::new(LogClipboard),
         },
         "Test PC".into(),
     );
@@ -358,4 +360,104 @@ async fn deck_edits_on_the_pc_reach_connected_phones_without_the_steps() {
     assert_eq!(msg["t"], "deck");
     assert_eq!(msg["deck"]["pages"][0]["cells"][0]["label"], "Script");
     assert!(!msg.to_string().contains("secret.exe"));
+}
+
+/// Envoie une requête HTTP brute et renvoie (code, corps).
+async fn http(base: &str, head: &str, body: &[u8]) -> (u16, String) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::TcpStream::connect(base).await.unwrap();
+    s.write_all(
+        format!(
+            "{head}\r\nHost: x\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .as_bytes(),
+    )
+    .await
+    .unwrap();
+    s.write_all(body).await.unwrap();
+    let mut out = Vec::new();
+    s.read_to_end(&mut out).await.unwrap();
+    let text = String::from_utf8_lossy(&out).into_owned();
+    let code = text[9..12].parse().unwrap();
+    let body = text.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+    (code, body)
+}
+
+#[tokio::test]
+async fn phone_clipboard_reaches_the_pc_only_when_enabled_and_authenticated() {
+    let (url, app, _rec) = boot().await;
+    let base = url.replace("ws://", "").replace("/ws", "");
+    let (_ws, token) = pair(&url, &app).await;
+    let post = |auth: String| {
+        format!("POST /clipboard HTTP/1.1\r\nContent-Type: text/plain;charset=utf-8{auth}")
+    };
+
+    // Option désactivée par défaut.
+    let (code, body) = http(
+        &base,
+        &post(format!("\r\nAuthorization: Bearer {token}")),
+        b"salut",
+    )
+    .await;
+    assert_eq!(code, 403, "{body}");
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["ok"], false);
+
+    let mut s = app.settings().settings;
+    s.clipboard.to_pc = true;
+    app.update_settings(app.settings().rev, s).unwrap();
+
+    let (code, _) = http(&base, &post(String::new()), b"salut").await;
+    assert_eq!(code, 401, "sans jeton");
+    let (code, _) = http(
+        &base,
+        &post("\r\nAuthorization: Bearer faux".into()),
+        b"salut",
+    )
+    .await;
+    assert_eq!(code, 401, "jeton inconnu");
+
+    let (code, body) = http(
+        &base,
+        &post(format!("\r\nAuthorization: Bearer {token}")),
+        b"salut",
+    )
+    .await;
+    assert_eq!(code, 200, "{body}");
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["ok"], true);
+
+    let (code, body) = http(
+        &base,
+        &format!(
+            "POST /clipboard HTTP/1.1\r\nContent-Type: image/png\r\nAuthorization: Bearer {token}"
+        ),
+        b"pas une image",
+    )
+    .await;
+    assert_eq!(code, 400, "{body}");
+    assert!(serde_json::from_str::<Value>(&body).unwrap()["message"]
+        .as_str()
+        .unwrap()
+        .contains("image"));
+}
+
+#[tokio::test]
+async fn phone_clipboard_accepts_screenshots_bigger_than_a_websocket_message() {
+    let (url, app, _rec) = boot().await;
+    let base = url.replace("ws://", "").replace("/ws", "");
+    let (_ws, token) = pair(&url, &app).await;
+    let mut s = app.settings().settings;
+    s.clipboard.to_pc = true;
+    app.update_settings(app.settings().rev, s).unwrap();
+    // ~3 Mo de texte : bien plus que la limite d'un message WebSocket.
+    let big = "a".repeat(3 * 1024 * 1024);
+    let (code, body) = http(
+        &base,
+        &format!(
+            "POST /clipboard HTTP/1.1\r\nContent-Type: text/plain\r\nAuthorization: Bearer {token}"
+        ),
+        big.as_bytes(),
+    )
+    .await;
+    assert_eq!(code, 200, "{body}");
 }

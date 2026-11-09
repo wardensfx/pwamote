@@ -2,11 +2,14 @@
 
 use std::sync::Arc;
 
+use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::DefaultBodyLimit;
 use axum::extract::{ConnectInfo, State};
+use axum::http::HeaderMap;
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 use pwamote_core::protocol::ServerMessage;
@@ -15,7 +18,7 @@ use std::net::SocketAddr;
 
 use crate::actions::ActionJob;
 use crate::session::Session;
-use crate::state::AppState;
+use crate::state::{AppState, ClipboardRefusal};
 use crate::tls::Pki;
 
 /// Taille maximale d'un message : largement assez pour des réglages ou du texte collé.
@@ -41,9 +44,66 @@ pub fn router(state: WebState) -> Router {
         .route("/ca.cer", get(ca_cer))
         .route("/pwamote.mobileconfig", get(mobileconfig))
         .route("/admin/pair", get(pair_page))
+        .route(
+            "/clipboard",
+            post(clipboard_from_phone)
+                .layer(DefaultBodyLimit::max(crate::clipboard::MAX_BODY_BYTES)),
+        )
         .route("/healthz", get(|| async { "ok" }))
         .fallback(static_asset)
         .with_state(state)
+}
+
+/// Reçoit ce que le téléphone a copié (texte ou image, corps brut avec son `Content-Type`)
+/// et le place dans le presse-papiers du PC. Passe par HTTP plutôt que par le WebSocket :
+/// une capture d'écran pèse plusieurs Mo et ne doit pas retarder les trames du pointeur.
+async fn clipboard_from_phone(
+    State(s): State<WebState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let header = |name| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string()
+    };
+    let token = header(header::AUTHORIZATION)
+        .strip_prefix("Bearer ")
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let content_type = header(header::CONTENT_TYPE);
+    let app = s.app.clone();
+    let result =
+        tokio::task::spawn_blocking(move || app.clipboard_from_phone(&token, &content_type, &body))
+            .await
+            .unwrap_or_else(|e| Err(ClipboardRefusal::System(e.to_string())));
+    let (status, message) = match result {
+        Ok(()) => (StatusCode::OK, None),
+        Err(e) => {
+            let status = match &e {
+                ClipboardRefusal::Unauthorized => StatusCode::UNAUTHORIZED,
+                ClipboardRefusal::Disabled => StatusCode::FORBIDDEN,
+                ClipboardRefusal::Invalid(crate::clipboard::ClipboardError::TooLarge) => {
+                    StatusCode::PAYLOAD_TOO_LARGE
+                }
+                ClipboardRefusal::Invalid(crate::clipboard::ClipboardError::Unsupported(_)) => {
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE
+                }
+                ClipboardRefusal::Invalid(_) => StatusCode::BAD_REQUEST,
+                ClipboardRefusal::System(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            tracing::warn!(error = %e, "presse-papiers du téléphone refusé");
+            (status, Some(e.to_string()))
+        }
+    };
+    (
+        status,
+        axum::Json(serde_json::json!({ "ok": message.is_none(), "message": message })),
+    )
+        .into_response()
 }
 
 async fn ca_cer(State(s): State<WebState>) -> Response {

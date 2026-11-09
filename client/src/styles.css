@@ -293,6 +293,14 @@ input[type="range"]::-webkit-slider-thumb {
 @keyframes shake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
 .deck-empty { margin: 6px 8px; color: var(--ink-dim); font-size: 14px; line-height: 1.4; }
 
+.toast.good { color: var(--accent); white-space: nowrap; }
+.clip-key svg { width: 20px; height: 20px; stroke: var(--accent); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
+.toast.clip-offer { display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 6px; white-space: nowrap; }
+.clip-offer button { font: inherit; color: var(--ink); background: none; border: 0; padding: 8px 10px; border-radius: 14px; }
+.clip-offer .clip-send { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+.clip-offer .clip-send svg { width: 18px; height: 18px; stroke: var(--accent); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.clip-offer .clip-close { color: var(--ink-faint); font-size: 18px; line-height: 1; }
+.clip-offer button:active { background: var(--glass); }
 .toast.bad { color: var(--bad); border-color: rgba(239, 138, 128, 0.35); max-width: calc(100vw - 32px); text-align: center; }
 
 /* Formulaire d'action */

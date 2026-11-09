@@ -44,6 +44,18 @@ pub fn system_sinks(
     }
 }
 
+/// Presse-papiers du système : Windows, ou simple journal ailleurs.
+pub fn system_clipboard() -> Arc<dyn crate::clipboard::ClipboardSink> {
+    #[cfg(windows)]
+    {
+        Arc::new(crate::platform::windows_clipboard::WindowsClipboard)
+    }
+    #[cfg(not(windows))]
+    {
+        Arc::new(crate::clipboard::LogClipboard)
+    }
+}
+
 pub struct Opened {
     pub supervisor: Arc<Supervisor>,
     pub data_dir: PathBuf,
@@ -71,6 +83,7 @@ pub fn open(dir: PathBuf) -> Result<Opened, Box<dyn std::error::Error + Send + S
             input,
             magnifier,
             launcher: Arc::new(crate::actions::SystemLauncher),
+            clipboard: system_clipboard(),
         },
         machine.clone(),
     );

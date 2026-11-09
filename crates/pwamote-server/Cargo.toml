@@ -13,6 +13,7 @@ directories = "6.0.0"
 futures-util = "0.3.34"
 hostname = "0.4.2"
 if-addrs = "0.15.0"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 mdns-sd = "0.21.7"
 mime_guess = "2.0.5"
 pwamote-core = { path = "../pwamote-core" }
@@ -31,6 +32,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ts-rs = { version = "12", features = ["serde-compat"] }
 
 [target."cfg(windows)".dependencies]
+arboard = "3.7.0"
 windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_Magnification", "Win32_UI_HiDpi", "Win32_UI_Accessibility", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole", "Win32_UI_Shell", "Win32_System_Threading", "Win32_System_Registry"] }
 
 [dev-dependencies]

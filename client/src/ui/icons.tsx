@@ -38,3 +38,9 @@ export const DeckIcon = I(
     <path d="M17 13.8v6.4M13.8 17h6.4" />
   </>,
 );
+export const ClipboardIcon = I(
+  <>
+    <rect x="6" y="4.5" width="12" height="16" rx="2.5" />
+    <path d="M9.5 4.5V4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v.5M9.5 11h5M9.5 14.5h3.5" />
+  </>,
+);

@@ -25,6 +25,7 @@ flowchart LR
     CORE["pwamote-core<br/>pointeur · loupe · réglages · appairage"]
     IN["InputSink<br/>SendInput"]
     MAG["MagnifierSink<br/>API Magnification"]
+    CLIP["ClipboardSink<br/>presse-papiers (arboard)"]
     ACT["Actions<br/>touches · programmes · ouvertures"]
     ST["AppState<br/>réglages + appareils (JSON)"]
     WEB --> SES --> CORE
@@ -32,9 +33,11 @@ flowchart LR
     SES --> MAG
     SES --> ACT
     SES <--> ST
+    WEB -- "POST /clipboard" --> CLIP
   end
 
   CONN <== "wss://pwamote-pc.local:8443/ws<br/>JSON (contrôle) + binaire (capteurs)" ==> WEB
+  UI -. "https://…/clipboard<br/>texte ou image" .-> WEB
   MDNS(("mDNS<br/>_pwamote._tcp")) -.-> Phone
   WEB -.annonce.-> MDNS
 ```
@@ -215,6 +218,29 @@ stateDiagram-v2
   note right of Libre: le filtre et l'accumulateur sont remis à zéro à chaque transition
 ```
 
+### La surface centrale selon le mode
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> Attente: doigt posé
+  Attente --> Clic: levé avant 250 ms
+  Attente --> Enfonce: 250 ms sans balayage, bouton gauche appuyé
+  Enfonce --> [*]: levé, bouton relâché (glisser-déposer)
+  Attente --> Molette: balayage vertical de 40 px en 250 ms
+  Molette --> [*]: levé (aucun clic)
+  Clic --> [*]: clic gauche (deux taps = double clic)
+  note right of Attente: mode gyro continu, la surface est le bouton gauche
+```
+
+| Mode | 1 doigt posé | Tap | Balayage vertical rapide | 2 doigts |
+|---|---|---|---|---|
+| Gyro (pouce) | embraye le pointage | clic gauche | molette, curseur figé | molette |
+| Gyro continu | après 250 ms : bouton gauche maintenu | clic gauche | molette, sans clic | molette |
+| Trackpad | déplace le curseur | clic gauche | — | molette |
+
+Le délai de 250 ms avant d'enfoncer le bouton laisse le temps de reconnaître un balayage : sans lui, chaque défilement commencerait par un clic.
+
 ## Réglages synchronisés
 
 Le **serveur est la source de vérité**. Les modifications du téléphone sont des fonctions rejouées par-dessus la dernière version reçue : si deux téléphones changent deux réglages différents en même temps, les deux changements sont conservés.
@@ -249,6 +275,7 @@ Les réglages sont validés et ramenés dans des plages sûres côté serveur (`
 | téléphone → PC | JSON | `hello`, `pair`, `button`, `key_tap`, `key`, `modifier`, `text`, `clutch`, `recenter`, `magnifier`, `update_settings`, `run_action`, `ping` |
 | téléphone → PC | binaire | `0x01` mouvement (7 × f32), `0x02` trackpad (2 × f32), `0x03` défilement (2 × f32), `0x04` accélération linéaire pour l'option « déplacements du téléphone » (4 × f32), little-endian |
 | PC → téléphone | JSON | `paired`, `welcome`, `deck`, `settings`, `magnifier_state`, `action_result`, `error`, `pong` |
+| téléphone → PC | HTTPS `POST /clipboard` | texte ou image brut, jeton d'appareil en `Authorization: Bearer` (voir « Presse-papiers ») |
 
 Garanties de sécurité côté serveur :
 
@@ -256,6 +283,40 @@ Garanties de sécurité côté serveur :
 - un clic, une touche ou un modificateur maintenu est **relâché** quand le téléphone se déconnecte ;
 - les doubles « appui » sont ignorés (seules les vraies transitions partent) ;
 - taille de message limitée à 64 Ko, trames binaires invalides ignorées.
+
+## Presse-papiers du téléphone vers le PC
+
+Option **Réglages › Presse-papiers › Copier du téléphone vers le PC** (réglage synchronisé `clipboard.to_pc`, désactivé par défaut). Ce qui est copié sur le téléphone, **texte ou image**, arrive dans le presse-papiers de Windows : il suffit de faire Ctrl+V sur le PC.
+
+Contraintes d'iOS/Safari, qui dictent l'interface :
+
+- une page web ne peut **pas** surveiller le presse-papiers : `navigator.clipboard.read()` n'est permis que pendant un tap de l'utilisateur, sur HTTPS (déjà le cas) ;
+- quand le contenu vient d'une autre app, Safari affiche une bulle **« Coller »** à toucher pour confirmer ; c'est imposé par iOS et non contournable ;
+- un collage classique dans un champ (appui long › Coller) donne accès au contenu sans cette bulle.
+
+D'où trois façons d'envoyer, toutes d'un tap :
+
+```mermaid
+flowchart TD
+  A["Copier dans une autre app<br/>(Photos, Safari, Notes…)"] --> B["Revenir dans PwaMote"]
+  B --> C{"option activée<br/>et absent ≥ 1 s ?"}
+  C -- oui --> D["Bandeau « Envoyer le presse-papiers »<br/>pendant 8 s"]
+  D -- tap --> R["navigator.clipboard.read()<br/>+ bulle « Coller » d'iOS"]
+  K["Bouton presse-papiers du clavier<br/>ou bouton des réglages"] -- tap --> R
+  P["Image collée dans le champ du clavier"] --> I["clipboardData (sans bulle)"]
+  R --> X{"contenu"}
+  X -- "image PNG/JPEG/GIF/WebP/BMP" --> S
+  X -- "autre image (HEIC…)" --> V["ré-encodée en PNG<br/>sur le téléphone"] --> S
+  X -- texte --> S
+  I --> S["POST /clipboard<br/>Authorization: Bearer jeton<br/>Content-Type: type du contenu<br/>corps brut"]
+  S --> W{"jeton valide ?<br/>option activée ?"}
+  W -- non --> E["401 / 403 + message"]
+  W -- oui --> DEC["décodage (crate image)<br/>limites : 40 Mo, 16 384 px de côté"]
+  DEC --> WIN["arboard : CF_UNICODETEXT (CRLF)<br/>ou image DIB + PNG (transparence)"]
+  WIN --> OK["200 → « Image copiée sur le PC · Ctrl+V »"]
+```
+
+Pourquoi une requête HTTP plutôt que le WebSocket : une capture d'écran d'iPhone pèse plusieurs Mo, bien au-delà de la limite de 64 Ko des messages, et elle ne doit pas retarder les trames du gyroscope. La requête est authentifiée avec le même jeton d'appareil que la session, et le décodage tourne hors de la boucle async (`spawn_blocking`).
 
 ## Actions programmables
 
