@@ -17,6 +17,10 @@ use rcgen::{
 
 const CA_KEY_FILE: &str = "ca-key.pem";
 const CA_CERT_FILE: &str = "ca-cert.pem";
+const LEAF_CERT_FILE: &str = "server-cert.pem";
+const LEAF_KEY_FILE: &str = "server-key.pem";
+/// Un certificat serveur enregistré est réémis quand il lui reste moins de 30 jours.
+const LEAF_RENEW_DAYS: i64 = 30;
 /// iOS refuse les certificats serveur valides plus de 825 jours.
 const LEAF_VALIDITY_DAYS: i64 = 397;
 const CA_VALIDITY_DAYS: i64 = 3650;
@@ -25,6 +29,8 @@ pub struct Pki {
     ca_key: KeyPair,
     ca_cert_pem: String,
     ca_cert_der: Vec<u8>,
+    /// Dossier où le certificat serveur est conservé d'un lancement à l'autre (`None` : en mémoire).
+    dir: Option<std::path::PathBuf>,
 }
 
 pub struct LeafCert {
@@ -73,6 +79,39 @@ fn pem_to_der(pem: &str) -> Result<Vec<u8>, PkiError> {
         .map_err(|_| PkiError::BadPem)
 }
 
+struct Coverage {
+    hosts: Vec<String>,
+    ips: Vec<IpAddr>,
+    not_after: time::OffsetDateTime,
+}
+
+/// Noms, adresses et échéance du premier certificat d'une chaîne PEM.
+fn leaf_coverage(chain_pem: &str) -> Option<Coverage> {
+    use rustls::pki_types::pem::PemObject as _;
+    use x509_parser::extensions::GeneralName;
+    let der = rustls::pki_types::CertificateDer::pem_slice_iter(chain_pem.as_bytes())
+        .next()?
+        .ok()?;
+    let (_, cert) = x509_parser::parse_x509_certificate(&der).ok()?;
+    let mut out = Coverage {
+        hosts: vec![],
+        ips: vec![],
+        not_after: cert.validity().not_after.to_datetime(),
+    };
+    for name in &cert.subject_alternative_name().ok()??.value.general_names {
+        match name {
+            GeneralName::DNSName(d) => out.hosts.push(d.to_string()),
+            GeneralName::IPAddress(b) => match b.len() {
+                4 => out.ips.push(IpAddr::from(<[u8; 4]>::try_from(*b).ok()?)),
+                16 => out.ips.push(IpAddr::from(<[u8; 16]>::try_from(*b).ok()?)),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
 impl Pki {
     /// Charge l'autorité depuis `dir`, ou la crée au premier lancement.
     pub fn load_or_create(dir: &Path) -> Result<Self, PkiError> {
@@ -88,9 +127,11 @@ impl Pki {
                 ca_key,
                 ca_cert_pem: cert_pem,
                 ca_cert_der,
+                dir: Some(dir.to_path_buf()),
             });
         }
-        let pki = Self::generate()?;
+        let mut pki = Self::generate()?;
+        pki.dir = Some(dir.to_path_buf());
         std::fs::create_dir_all(dir)?;
         std::fs::write(&key_path, pki.ca_key.serialize_pem())?;
         std::fs::write(&cert_path, &pki.ca_cert_pem)?;
@@ -107,7 +148,59 @@ impl Pki {
             ca_cert_pem: cert.pem(),
             ca_cert_der: cert.der().to_vec(),
             ca_key,
+            dir: None,
         })
+    }
+
+    /// Certificat serveur **stable** : celui du lancement précédent s'il couvre déjà ces noms
+    /// et adresses, sinon un nouveau qui couvre aussi les anciens (revenir à une adresse déjà
+    /// utilisée ne change donc plus le certificat). Safari mémorise l'exception acceptée pour
+    /// un certificat précis : un certificat refait à chaque démarrage l'obligeait à tout revalider.
+    pub fn server_leaf(&self, hosts: &[String], ips: &[IpAddr]) -> Result<LeafCert, PkiError> {
+        let Some(dir) = &self.dir else {
+            return self.issue_leaf(hosts, ips);
+        };
+        let saved = std::fs::read_to_string(dir.join(LEAF_CERT_FILE))
+            .ok()
+            .zip(std::fs::read_to_string(dir.join(LEAF_KEY_FILE)).ok())
+            .map(|(chain_pem, key_pem)| LeafCert { chain_pem, key_pem })
+            .filter(|l| l.chain_pem.ends_with(&self.ca_cert_pem));
+        let covered = saved.as_ref().and_then(|l| leaf_coverage(&l.chain_pem));
+        if let (Some(leaf), Some(c)) = (&saved, &covered) {
+            let fresh = c.not_after - time::OffsetDateTime::now_utc()
+                > time::Duration::days(LEAF_RENEW_DAYS);
+            if fresh
+                && hosts
+                    .iter()
+                    .all(|h| c.hosts.iter().any(|x| x.eq_ignore_ascii_case(h)))
+                && ips.iter().all(|ip| c.ips.contains(ip))
+            {
+                return Ok(LeafCert {
+                    chain_pem: leaf.chain_pem.clone(),
+                    key_pem: leaf.key_pem.clone(),
+                });
+            }
+        }
+        let mut all_hosts = hosts.to_vec();
+        let mut all_ips = ips.to_vec();
+        if let Some(c) = covered {
+            for h in c.hosts {
+                if !all_hosts.iter().any(|x| x.eq_ignore_ascii_case(&h)) {
+                    all_hosts.push(h);
+                }
+            }
+            for ip in c.ips {
+                if !all_ips.contains(&ip) {
+                    all_ips.push(ip);
+                }
+            }
+        }
+        let leaf = self.issue_leaf(&all_hosts, &all_ips)?;
+        std::fs::create_dir_all(dir)?;
+        std::fs::write(dir.join(LEAF_KEY_FILE), &leaf.key_pem)?;
+        std::fs::write(dir.join(LEAF_CERT_FILE), &leaf.chain_pem)?;
+        tracing::info!(hosts = ?all_hosts, ips = ?all_ips, "nouveau certificat serveur local");
+        Ok(leaf)
     }
 
     pub fn ca_cert_pem(&self) -> &str {
@@ -210,6 +303,67 @@ mod tests {
         let b = Pki::load_or_create(dir.path()).unwrap();
         assert_eq!(a.ca_cert_der(), b.ca_cert_der());
         assert!(a.ca_cert_pem().starts_with("-----BEGIN CERTIFICATE-----"));
+    }
+
+    #[test]
+    fn server_leaf_is_kept_across_restarts() {
+        let dir = tempfile::tempdir().unwrap();
+        let hosts = vec!["pwamote-pc.local".to_string(), "localhost".to_string()];
+        let ips: Vec<IpAddr> = vec!["192.168.1.20".parse().unwrap()];
+        let first = Pki::load_or_create(dir.path())
+            .unwrap()
+            .server_leaf(&hosts, &ips)
+            .unwrap();
+        // « Redémarrage » : nouvelle instance, mêmes fichiers.
+        let pki = Pki::load_or_create(dir.path()).unwrap();
+        let again = pki.server_leaf(&hosts, &ips).unwrap();
+        assert_eq!(first.chain_pem, again.chain_pem, "même certificat");
+        assert_eq!(first.key_pem, again.key_pem);
+        // Un sous-ensemble (l'autre IP a disparu) ne change rien non plus.
+        assert_eq!(
+            pki.server_leaf(&hosts[..1], &[]).unwrap().chain_pem,
+            first.chain_pem
+        );
+    }
+
+    #[test]
+    fn a_new_address_reissues_a_leaf_that_still_covers_the_old_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let pki = Pki::load_or_create(dir.path()).unwrap();
+        let old: IpAddr = "192.168.1.20".parse().unwrap();
+        let new: IpAddr = "192.168.1.42".parse().unwrap();
+        let a = pki.server_leaf(&["localhost".into()], &[old]).unwrap();
+        let b = pki.server_leaf(&["localhost".into()], &[new]).unwrap();
+        assert_ne!(a.chain_pem, b.chain_pem);
+        let c = leaf_coverage(&b.chain_pem).unwrap();
+        assert!(c.ips.contains(&old) && c.ips.contains(&new));
+        // Revenir à l'ancienne adresse : plus de nouveau certificat.
+        assert_eq!(
+            pki.server_leaf(&["localhost".into()], &[old])
+                .unwrap()
+                .chain_pem,
+            b.chain_pem
+        );
+    }
+
+    #[test]
+    fn a_leaf_from_another_ca_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let pki = Pki::load_or_create(dir.path()).unwrap();
+        let first = pki.server_leaf(&["localhost".into()], &[]).unwrap();
+        std::fs::remove_file(dir.path().join(CA_KEY_FILE)).unwrap();
+        let other = Pki::load_or_create(dir.path()).unwrap();
+        let leaf = other.server_leaf(&["localhost".into()], &[]).unwrap();
+        assert_ne!(leaf.chain_pem, first.chain_pem);
+        assert!(leaf.chain_pem.ends_with(other.ca_cert_pem()));
+    }
+
+    #[test]
+    fn in_memory_pki_does_not_touch_the_disk() {
+        let pki = Pki::generate().unwrap();
+        let a = pki.server_leaf(&["localhost".into()], &[]).unwrap();
+        let b = pki.server_leaf(&["localhost".into()], &[]).unwrap();
+        assert_ne!(a.key_pem, b.key_pem);
     }
 
     #[test]

@@ -165,7 +165,7 @@ sequenceDiagram
 
 Safari n'expose le gyroscope et ne permet l'installation hors-ligne qu'en HTTPS. Deux certificats coexistent :
 
-- **Autorité locale** (toujours là) : créée au premier lancement, elle signe à chaque démarrage un certificat pour `pwamote-<machine>.local`, les IP du moment et le domaine public s'il est configuré. L'iPhone doit installer le profil une fois.
+- **Autorité locale** (toujours là, par défaut) : créée au premier lancement, elle signe un certificat pour `pwamote-<machine>.local`, les IP du PC et le domaine public s'il est configuré. Ce certificat est **conservé d'un lancement à l'autre** : une exception acceptée dans Safari reste valable après un redémarrage. Pour une confiance complète (PWA installée, hors-ligne), l'iPhone installe le profil une fois.
 - **Let's Encrypt** (facultatif) : un vrai certificat, reconnu partout, **sans profil à installer**. Let's Encrypt ne signe que des **noms de domaine publics** dont on prouve la maîtrise : ni IP, ni `.local`. PwaMote utilise donc le **défi DNS-01** sur un domaine choisi par l'utilisateur, dont l'enregistrement A pointe vers l'**IP locale** du PC. Le PC n'a jamais besoin d'être joignable depuis internet.
 
 | Service DNS | Domaine | Ce qu'il faut |
@@ -245,7 +245,7 @@ sequenceDiagram
 ```mermaid
 flowchart TD
   A["Premier lancement"] --> B["Création de la CA locale<br/>%APPDATA%\\PwaMote\\ca-*.pem"]
-  B --> C["Chaque démarrage : certificat serveur<br/>nom mDNS + IP + domaine public · 397 jours"]
+  B --> C["Certificat serveur conservé (server-cert.pem)<br/>réémis seulement pour une nouvelle adresse ou à 30 j de l'échéance<br/>couvre toutes les adresses déjà vues · 397 jours"]
   C --> D["Le téléphone ouvre /pwamote.mobileconfig"]
   D --> E["Réglages iOS › Profil téléchargé › Installer"]
   E --> F["Réglages › Général › Informations › Réglages des certificats<br/>activer la confiance totale pour « PwaMote Local CA »"]

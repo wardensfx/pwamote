@@ -232,7 +232,7 @@ impl Supervisor {
         }
         let leaf = self
             .pki
-            .issue_leaf(&names, &addrs)
+            .server_leaf(&names, &addrs)
             .map_err(|e| e.to_string())?;
         self.resolver
             .set_local(&PemCert {

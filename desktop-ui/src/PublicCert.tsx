@@ -60,15 +60,16 @@ export function PublicCertCard(props: {
     <section class="glass cert">
       <div class="row">
         <div class="row-text">
-          <h2>Certificat Let's Encrypt</h2>
-          <div class="row-hint">Plus de profil à installer sur l'iPhone : un vrai certificat, reconnu partout, pour un nom de domaine public.</div>
+          <h2>Votre propre domaine</h2>
+          <div class="row-hint">Facultatif. Un certificat Let's Encrypt pour un nom de domaine public que vous contrôlez (DuckDNS, Cloudflare).</div>
         </div>
-        <label class="switch" aria-label="Utiliser Let's Encrypt">
+        <label class="switch" aria-label="Utiliser votre propre domaine">
           <input type="checkbox" role="switch" checked={props.config.enabled} disabled={saving()} onChange={(e) => void save(e.currentTarget.checked)} />
           <i />
         </label>
       </div>
 
+      <Show when={props.config.enabled}>
       <div class="cert-state" data-tone={summary().tone}>
         <span class="dot" />
         <div>
@@ -78,8 +79,6 @@ export function PublicCertCard(props: {
           </Show>
         </div>
       </div>
-
-      <Show when={props.config.enabled}>
         <div class="segmented" role="radiogroup" aria-label="Service DNS">
           <button role="radio" aria-checked={kind() === "duck_dns"} onClick={() => setKind("duck_dns")}>
             DuckDNS <span>gratuit</span>
