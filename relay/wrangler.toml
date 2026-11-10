@@ -6,13 +6,10 @@ routes = [{ pattern = "dns.pwamote.app", custom_domain = true }]
 
 [vars]
 ZONE_NAME = "pwamote.app"
-# Identifiant de la zone pwamote.app (tableau de bord Cloudflare › pwamote.app › colonne de droite).
-ZONE_ID = "A_RENSEIGNER"
 
+# Espace de stockage des inscriptions : créé automatiquement au premier déploiement.
 [[kv_namespaces]]
 binding = "DEVICES"
-# Créé par : npx wrangler kv namespace create DEVICES
-id = "A_RENSEIGNER"
 
 # Ménage hebdomadaire des PC disparus depuis plus de 180 jours.
 [triggers]

@@ -12,21 +12,19 @@ Worker Cloudflare qui donne à chaque PC un nom `<id>.pwamote.app` (12 caractèr
 
 Authentification : `Authorization: Bearer <id>.<secret>` ; seule l'empreinte SHA-256 du secret est conservée (KV). Un ménage hebdomadaire supprime les PC muets depuis 180 jours.
 
-## Mise en service (une fois)
+## Mise en service (une fois), depuis le tableau de bord Cloudflare
 
-1. Cloudflare › **pwamote.app** › colonne de droite : copier l'**ID de zone** dans `wrangler.toml` (`ZONE_ID`).
-2. Cloudflare › Mon profil › Jetons d'API › Créer : modèle « Modifier la zone DNS », zone **pwamote.app** uniquement.
-3. Dans ce dossier :
-   ```sh
-   npm ci
-   npx wrangler login
-   npx wrangler kv namespace create DEVICES   # copier l'id dans wrangler.toml
-   npx wrangler secret put CF_API_TOKEN       # coller le jeton de l'étape 2
-   npx wrangler deploy
-   ```
+1. Cloudflare › My Profile › API Tokens › **Create Token** › Custom : zone **pwamote.app** uniquement, droits `Zone · Zone · Read` et `Zone · DNS · Edit`. Copier le jeton.
+2. **Workers & Pages › Create › Import a repository** : choisir `wardensfx/pwamote`, branche `main`.
+   - Nom du Worker : `pwamote-relay`
+   - **Root directory : `relay`**
+   - Build command : *(vide)* · Deploy command : `npx wrangler deploy`
+3. Une fois créé : Worker › **Settings › Variables and Secrets › Add** : type **Secret**, nom `CF_API_TOKEN`, valeur = le jeton. Puis relancer le déploiement (Deployments › Retry).
 4. Vérifier : `https://dns.pwamote.app/v1/health` répond `{"ok":true}`.
 
-Le serveur PwaMote utilise `https://dns.pwamote.app` par défaut (`PWAMOTE_RELAY_URL` pour un autre service).
+Le premier déploiement crée tout seul le stockage KV `DEVICES` et le domaine `dns.pwamote.app` (la zone est dans le même compte). Les déploiements suivants se font à chaque push sur `main`. Le secret n'est jamais dans le dépôt.
+
+En ligne de commande, c'est équivalent : `npm ci && npx wrangler login && npx wrangler secret put CF_API_TOKEN && npx wrangler deploy`.
 
 ## Limite Let's Encrypt
 

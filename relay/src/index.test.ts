@@ -25,6 +25,7 @@ function fakeCloudflare() {
     const url = new URL(input);
     const ok = (result: unknown) => new Response(JSON.stringify({ success: true, result }));
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer cf-token");
+    if (url.pathname === "/client/v4/zones") return ok([{ id: "zone1" }]);
     const path = url.pathname.replace("/client/v4/zones/zone1", "");
     const method = init?.method ?? "GET";
     if (path === "/dns_records" && method === "GET")
@@ -51,7 +52,7 @@ beforeEach(() => {
   kv = memoryKv();
   cf = fakeCloudflare();
   vi.stubGlobal("fetch", cf.fetch);
-  env = { DEVICES: kv as unknown as KVNamespace, CF_API_TOKEN: "cf-token", ZONE_ID: "zone1", ZONE_NAME: "pwamote.app" };
+  env = { DEVICES: kv as unknown as KVNamespace, CF_API_TOKEN: "cf-token", ZONE_NAME: "pwamote.app" };
 });
 afterEach(() => vi.unstubAllGlobals());
 

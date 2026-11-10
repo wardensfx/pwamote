@@ -7,9 +7,10 @@
 
 export interface Env {
   DEVICES: KVNamespace;
-  /** Jeton d'API Cloudflare limité à la zone, droit DNS : Modifier (secret). */
+  /** Jeton d'API Cloudflare limité à la zone : Zone · Lecture et DNS · Modifier (secret). */
   CF_API_TOKEN: string;
-  ZONE_ID: string;
+  /** Facultatif : retrouvé par le nom de zone si absent. */
+  ZONE_ID?: string;
   ZONE_NAME: string;
 }
 
@@ -68,8 +69,20 @@ function sameString(a: string, b: string): boolean {
 
 type DnsRecord = { id: string };
 
+let zoneCache: { name: string; id: string } | null = null;
+
+async function zoneId(env: Env): Promise<string> {
+  if (env.ZONE_ID) return env.ZONE_ID;
+  if (zoneCache?.name === env.ZONE_NAME) return zoneCache.id;
+  const rsp = await fetch(`${CF_API}/zones?name=${encodeURIComponent(env.ZONE_NAME)}`, { headers: { authorization: `Bearer ${env.CF_API_TOKEN}` } });
+  const j = (await rsp.json()) as { success: boolean; result: { id: string }[] };
+  if (!j.success || !j.result[0]) throw new Error(`zone ${env.ZONE_NAME} introuvable avec ce jeton`);
+  zoneCache = { name: env.ZONE_NAME, id: j.result[0].id };
+  return zoneCache.id;
+}
+
 async function cf(env: Env, method: string, path: string, body?: unknown): Promise<unknown> {
-  const rsp = await fetch(`${CF_API}/zones/${env.ZONE_ID}${path}`, {
+  const rsp = await fetch(`${CF_API}/zones/${await zoneId(env)}${path}`, {
     method,
     headers: { authorization: `Bearer ${env.CF_API_TOKEN}`, "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
