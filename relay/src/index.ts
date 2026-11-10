@@ -22,6 +22,9 @@ const REGISTER_PER_HOUR = 10;
 const STALE_AFTER_DAYS = 180;
 const CF_API = "https://api.cloudflare.com/client/v4";
 
+/** Le secret collé dans le tableau de bord peut contenir un espace ou un retour à la ligne. */
+const bearer = (env: Env) => `Bearer ${env.CF_API_TOKEN.trim()}`;
+
 // ------------------------------------------------------------- règles pures
 
 /** Adresse IPv4 d'un réseau privé : 10/8, 172.16/12, 192.168/16, 100.64/10 (CGNAT, Tailscale). */
@@ -74,7 +77,7 @@ let zoneCache: { name: string; id: string } | null = null;
 async function zoneId(env: Env): Promise<string> {
   if (env.ZONE_ID) return env.ZONE_ID;
   if (zoneCache?.name === env.ZONE_NAME) return zoneCache.id;
-  const rsp = await fetch(`${CF_API}/zones?name=${encodeURIComponent(env.ZONE_NAME)}`, { headers: { authorization: `Bearer ${env.CF_API_TOKEN}` } });
+  const rsp = await fetch(`${CF_API}/zones?name=${encodeURIComponent(env.ZONE_NAME)}`, { headers: { authorization: bearer(env) } });
   const j = (await rsp.json()) as { success: boolean; result: { id: string }[]; errors?: { message: string }[] };
   if (!j.success) throw new Error(`recherche de zone refusée : ${(j.errors ?? []).map((e) => e.message).join(" ; ") || rsp.status}`);
   if (!j.result[0]) throw new Error(`zone ${env.ZONE_NAME} introuvable avec ce jeton`);
@@ -85,11 +88,11 @@ async function zoneId(env: Env): Promise<string> {
 async function cf(env: Env, method: string, path: string, body?: unknown): Promise<unknown> {
   const rsp = await fetch(`${CF_API}/zones/${await zoneId(env)}${path}`, {
     method,
-    headers: { authorization: `Bearer ${env.CF_API_TOKEN}`, "content-type": "application/json" },
+    headers: { authorization: bearer(env), "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const json = (await rsp.json()) as { success: boolean; result: unknown; errors?: { message: string }[] };
-  if (!json.success) throw new Error(`Cloudflare : ${(json.errors ?? []).map((e) => e.message).join(" ; ")}`);
+  const json = (await rsp.json()) as { success: boolean; result: unknown; errors?: { code?: number; message: string }[] };
+  if (!json.success) throw new Error(`Cloudflare : ${(json.errors ?? []).map((e) => `${e.message} (${e.code ?? rsp.status})`).join(" ; ")}`);
   return json.result;
 }
 
