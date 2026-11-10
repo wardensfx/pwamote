@@ -88,8 +88,30 @@ pub fn open(dir: PathBuf) -> Result<Opened, Box<dyn std::error::Error + Send + S
         machine.clone(),
     );
     let ips: IpProvider = Arc::new(net::local_ipv4s);
+    let supervisor = Supervisor::new(app, pki, persist, config, machine, ips.clone())
+        .with_public_cert(|resolver| public_cert_deps(&dir, resolver, ips));
     Ok(Opened {
-        supervisor: Arc::new(Supervisor::new(app, pki, persist, config, machine, ips)),
+        supervisor: Arc::new(supervisor),
         data_dir: dir,
     })
+}
+
+/// Vrais services : Let's Encrypt, DuckDNS/Cloudflare, test de connexion TCP, horloge système.
+fn public_cert_deps(
+    dir: &std::path::Path,
+    resolver: Arc<crate::public_cert::CertResolver>,
+    ips: IpProvider,
+) -> crate::public_cert::maintainer::Deps {
+    use crate::public_cert::{acme, connectivity, dns, store::CertStore};
+    let http = dns::http_client();
+    let store = CertStore::new(dir);
+    crate::public_cert::maintainer::Deps {
+        resolver,
+        issuer: Arc::new(acme::LetsEncryptIssuer::new(store.clone(), http.clone())),
+        store,
+        dns: Arc::new(move |cfg| dns::for_config(cfg, http.clone())),
+        probe: Arc::new(connectivity::TcpProbe::default()),
+        ips,
+        clock: Arc::new(time::OffsetDateTime::now_utc),
+    }
 }

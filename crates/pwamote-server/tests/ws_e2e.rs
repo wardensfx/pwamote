@@ -85,9 +85,7 @@ async fn boot() -> (String, Arc<AppState>, Arc<Recorder>) {
         let state = WebState {
             app: app2,
             pki,
-            origin: Arc::new(std::sync::OnceLock::from(
-                "https://pwamote-test.local:8443".to_string(),
-            )),
+            origin: Arc::new(|| Some("https://pwamote-test.local:8443".to_string())),
         };
         let service = router(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
         axum::serve(listener, service).await.unwrap()

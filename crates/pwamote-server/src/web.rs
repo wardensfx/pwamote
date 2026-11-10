@@ -33,9 +33,9 @@ struct Assets;
 pub struct WebState {
     pub app: Arc<AppState>,
     pub pki: Arc<Pki>,
-    /// Adresse publique, telle que le téléphone doit l'ouvrir : `https://192.168.1.20:8443`.
-    /// Renseignée une fois le port réel connu.
-    pub origin: Arc<std::sync::OnceLock<String>>,
+    /// Adresse publique, telle que le téléphone doit l'ouvrir : `https://192.168.1.20:8443`
+    /// ou `https://yann.duckdns.org:8443`. `None` tant que le port réel n'est pas connu.
+    pub origin: Arc<dyn Fn() -> Option<String> + Send + Sync>,
 }
 
 pub fn router(state: WebState) -> Router {
@@ -297,10 +297,10 @@ async fn pair_page(
     if !peer.ip().is_loopback() {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let Some(origin) = s.origin.get() else {
+    let Some(origin) = (s.origin)() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    let url = pairing_url(origin, &s.app.new_pairing_code());
+    let url = pairing_url(&origin, &s.app.new_pairing_code());
     let html = format!(
         r#"<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Associer un téléphone · PwaMote</title>

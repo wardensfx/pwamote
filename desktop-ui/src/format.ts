@@ -1,5 +1,6 @@
 import type { AppConfig } from "../../client/src/generated/AppConfig";
 import type { Candidate } from "../../client/src/generated/Candidate";
+import type { PublicCertStatus } from "../../client/src/generated/PublicCertStatus";
 
 /**
  * Valeur du menu d'adresses pour la configuration courante :
@@ -46,4 +47,39 @@ export function countdown(seconds: number): string {
 export function phonesLabel(n: number): string {
   if (n === 0) return "Aucun téléphone connecté";
   return n === 1 ? "1 téléphone connecté" : `${n} téléphones connectés`;
+}
+
+
+export type CertTone = "ok" | "wait" | "error" | "off";
+
+/** Résumé du certificat Let's Encrypt pour la fenêtre : pastille, titre, détail. */
+export function publicCertSummary(s: PublicCertStatus, now: number): { tone: CertTone; title: string; detail: string } {
+  const test = s.staging ? " (serveur de test)" : "";
+  switch (s.phase) {
+    case "disabled":
+      return { tone: "off", title: "Certificat local uniquement", detail: "Les iPhone doivent installer le profil de confiance PwaMote." };
+    case "incomplete":
+      return { tone: "error", title: "Réglages incomplets", detail: s.message ?? "" };
+    case "waiting_for_network":
+      return { tone: "wait", title: "En attente d'internet", detail: s.message ?? "Le certificat local sert en attendant." };
+    case "obtaining":
+      return { tone: "wait", title: `Demande à Let's Encrypt en cours${test}…`, detail: "Publication du défi DNS puis validation, une à deux minutes." };
+    case "failed":
+      return { tone: "error", title: "Certificat non obtenu", detail: `${s.message ?? ""}${retryIn(s, now)}` };
+    case "active": {
+      const until = s.expires_at ? `valide encore ${daysLeft(now, s.expires_at)}` : "valide";
+      return { tone: s.message ? "wait" : "ok", title: `Let's Encrypt${test} · ${until}`, detail: s.message ?? `Renouvelé automatiquement 30 jours avant l'échéance.` };
+    }
+  }
+}
+
+function daysLeft(now: number, at: number): string {
+  const d = Math.floor((at - now) / 86400);
+  return d >= 1 ? `${d} j` : "moins d'un jour";
+}
+
+function retryIn(s: PublicCertStatus, now: number): string {
+  if (!s.next_check_at) return "";
+  const min = Math.max(1, Math.round((s.next_check_at - now) / 60));
+  return min < 120 ? ` Nouvel essai dans ${min} min.` : ` Nouvel essai dans ${Math.round(min / 60)} h.`;
 }

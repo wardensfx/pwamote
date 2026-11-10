@@ -14,12 +14,14 @@ futures-util = "0.3.34"
 hostname = "0.4.2"
 if-addrs = "0.15.0"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+instant-acme = { version = "0.8.5", default-features = false, features = ["ring", "hyper-rustls"] }
 mdns-sd = "0.21.7"
 mime_guess = "2.0.5"
 pwamote-core = { path = "../pwamote-core" }
 qrcode = "0.14.1"
 rand = "0.10.3"
 rcgen = { version = "0.14.10", features = ["pem"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "query"] }
 rust-embed = "8.13.0"
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 serde = { workspace = true, features = ["derive"] }
@@ -30,6 +32,7 @@ tokio = { version = "1.54.1", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ts-rs = { version = "12", features = ["serde-compat"] }
+x509-parser = "0.18.1"
 
 [target."cfg(windows)".dependencies]
 arboard = "3.7.0"

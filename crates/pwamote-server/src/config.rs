@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::net;
+use crate::public_cert::PublicCertConfig;
 
 pub const DEFAULT_PORT: u16 = 8443;
 
@@ -39,6 +40,8 @@ pub struct AppConfig {
     pub start_minimized: bool,
     /// Fermer la fenêtre la réduit dans la barre système au lieu de quitter.
     pub close_to_tray: bool,
+    /// Certificat Let's Encrypt pour un domaine public (repli : autorité locale).
+    pub public_cert: PublicCertConfig,
 }
 
 impl Default for AppConfig {
@@ -50,6 +53,7 @@ impl Default for AppConfig {
             launch_at_login: false,
             start_minimized: false,
             close_to_tray: true,
+            public_cert: PublicCertConfig::default(),
         }
     }
 }
@@ -73,6 +77,7 @@ pub fn is_valid_host(host: &str) -> bool {
 impl AppConfig {
     /// Ramène la configuration dans des valeurs sûres (fichier édité à la main, version future…).
     pub fn sanitized(mut self) -> Self {
+        self.public_cert = self.public_cert.sanitized();
         // Les ports privilégiés demandent des droits d'administrateur.
         if self.port != 0 && self.port < 1024 {
             self.port = DEFAULT_PORT;

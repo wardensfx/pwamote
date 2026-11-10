@@ -82,7 +82,8 @@ export function mockBackend(): Backend {
     { choice: { kind: "ip", ip: "10.8.0.4" } as const, host: "10.8.0.4", label: "10.8.0.4", recommended: false },
     { choice: { kind: "mdns" } as const, host: "pwamote-yann-pc.local", label: "pwamote-yann-pc.local", recommended: false },
   ];
-  let config: AppConfig = { port: 8443, server_enabled: true, address: { kind: "auto" }, launch_at_login: true, start_minimized: false, close_to_tray: true };
+  let config: AppConfig = { port: 8443, server_enabled: true, address: { kind: "auto" }, launch_at_login: true, start_minimized: false, close_to_tray: true,
+    public_cert: { enabled: false, domain: "", email: "", provider: { kind: "duck_dns", token: "" }, staging: false } };
   let devices: DeviceView[] = [
     { id: "a", name: "iPhone", paired_at: now() - 86400 * 3, last_seen: now() - 40 },
     { id: "b", name: "iPad", paired_at: now() - 86400 * 9, last_seen: now() - 86400 * 2 },
@@ -90,13 +91,27 @@ export function mockBackend(): Backend {
   let deck = exampleDeck();
   const subs = new Set<(s: ServerStatus) => void>();
   const status = (): ServerStatus => {
-    const host = config.address.kind === "mdns" ? "pwamote-yann-pc.local" : config.address.kind === "ip" ? config.address.ip : config.address.kind === "custom" ? config.address.host : "192.168.1.20";
+    const local = config.address.kind === "mdns" ? "pwamote-yann-pc.local" : config.address.kind === "ip" ? config.address.ip : config.address.kind === "custom" ? config.address.host : "192.168.1.20";
+    const pc = config.public_cert;
+    const token = pc.provider.kind === "duck_dns" ? pc.provider.token : pc.provider.api_token;
+    const ready = pc.enabled && pc.domain.includes(".") && token !== "";
+    const now = Math.floor(Date.now() / 1000);
+    const public_cert: ServerStatus["public_cert"] = {
+      phase: !pc.enabled ? "disabled" : ready ? "active" : "incomplete",
+      domain: pc.domain || null,
+      message: pc.enabled && !ready ? "Indiquez le nom de domaine et le jeton." : null,
+      expires_at: ready ? now + 74 * 86400 : null,
+      next_check_at: now + 6 * 3600,
+      online: true,
+      staging: pc.staging,
+    };
+    const host = ready ? pc.domain : local;
     const params = new URLSearchParams(location.search);
     const error = params.get("error") === "port" && config.server_enabled ? "Le port 8443 est déjà utilisé par un autre programme. Choisissez-en un autre dans les options." : null;
     const running = config.server_enabled && !error;
     return {
       running, port: running ? config.port : null, origin: running ? `https://${host}:${config.port}` : null, host: running ? host : null,
-      error, machine: "YANN-PC", connected: running ? 1 : 0, candidates, config,
+      error, machine: "YANN-PC", connected: running ? 1 : 0, candidates, config, public_cert,
     };
   };
   const push = () => subs.forEach((cb) => cb(status()));

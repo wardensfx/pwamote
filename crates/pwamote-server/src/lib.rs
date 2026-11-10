@@ -7,6 +7,7 @@ pub mod input;
 pub mod mdns;
 pub mod net;
 pub mod platform;
+pub mod public_cert;
 pub mod session;
 pub mod state;
 pub mod supervisor;

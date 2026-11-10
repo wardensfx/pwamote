@@ -20,7 +20,8 @@ flowchart LR
 
   subgraph PC["PC Windows 11 (pwamote-server)"]
     direction TB
-    WEB["axum + rustls<br/>HTTPS · WebSocket · PWA embarquée"]
+    WEB["axum + rustls<br/>HTTPS · WebSocket · PWA embarquée<br/>certificat choisi par SNI"]
+    CERT["Certificat public<br/>tâche de fond ACME"]
     SES["Session<br/>machine à états par téléphone"]
     CORE["pwamote-core<br/>pointeur · loupe · réglages · appairage"]
     IN["InputSink<br/>SendInput"]
@@ -34,12 +35,15 @@ flowchart LR
     SES --> ACT
     SES <--> ST
     WEB -- "POST /paste" --> CLIP
+    CERT -- "LE à chaud" --> WEB
   end
 
   CONN <== "wss://pwamote-pc.local:8443/ws<br/>JSON (contrôle) + binaire (capteurs)" ==> WEB
   UI -. "https://…/paste<br/>image collée" .-> WEB
   MDNS(("mDNS<br/>_pwamote._tcp")) -.-> Phone
   WEB -.annonce.-> MDNS
+  CERT -. "DNS-01 · enregistrement A" .-> DNSP(("DuckDNS /<br/>Cloudflare"))
+  CERT -. ACME .-> LEN(("Let's Encrypt"))
 ```
 
 Le serveur est découpé en **cœur pur** (`pwamote-core`, testé sans OS) et **adaptateurs** (`InputSink`, `MagnifierSink`) : les tests de session tournent avec de faux adaptateurs, Windows n'est impliqué que dans la dernière couche.
@@ -157,14 +161,91 @@ sequenceDiagram
   S-->>P: {t: "welcome", réglages}
 ```
 
-## HTTPS local
+## HTTPS : Let's Encrypt, avec repli sur l'autorité locale
 
-Safari n'expose le gyroscope et ne permet l'installation hors-ligne qu'en HTTPS. Le serveur crée sa propre autorité de certification une seule fois, puis émet un certificat pour `pwamote-<machine>.local` et les adresses IP du moment à chaque démarrage.
+Safari n'expose le gyroscope et ne permet l'installation hors-ligne qu'en HTTPS. Deux certificats coexistent :
+
+- **Autorité locale** (toujours là) : créée au premier lancement, elle signe à chaque démarrage un certificat pour `pwamote-<machine>.local`, les IP du moment et le domaine public s'il est configuré. L'iPhone doit installer le profil une fois.
+- **Let's Encrypt** (facultatif) : un vrai certificat, reconnu partout, **sans profil à installer**. Let's Encrypt ne signe que des **noms de domaine publics** dont on prouve la maîtrise : ni IP, ni `.local`. PwaMote utilise donc le **défi DNS-01** sur un domaine choisi par l'utilisateur, dont l'enregistrement A pointe vers l'**IP locale** du PC. Le PC n'a jamais besoin d'être joignable depuis internet.
+
+| Service DNS | Domaine | Ce qu'il faut |
+|---|---|---|
+| DuckDNS (gratuit) | `xxx.duckdns.org` | le jeton du compte |
+| Cloudflare | votre domaine (`pc.mondomaine.fr`) | un jeton d'API limité à la zone, droit DNS : Modifier |
+
+### Choix du certificat à chaque connexion
+
+Le serveur lit le nom demandé par le téléphone (SNI) : les deux certificats sont servis **en même temps**, sans redémarrage quand Let's Encrypt en délivre un nouveau.
+
+```mermaid
+flowchart LR
+  H["Connexion TLS"] --> Q{"nom demandé = domaine public<br/>et certificat LE valide ?"}
+  Q -- oui --> LE["Certificat Let's Encrypt<br/>reconnu sans profil"]
+  Q -- "non (IP, .local, localhost,<br/>LE absent ou expiré)" --> LOC["Certificat de l'autorité locale<br/>couvre aussi le domaine"]
+```
+
+Le **QR code** encode le domaine public dès qu'un certificat Let's Encrypt valide est chargé, sinon l'adresse locale choisie. Les téléphones déjà associés par IP continuent de fonctionner (même origine, même certificat local). Un téléphone qui passe de l'IP au domaine change d'origine : il faut le ré-associer une fois (le navigateur isole ses données par origine).
+
+### Tâche de fond : connexion, échéance, renouvellement
+
+```mermaid
+flowchart TD
+  T(["Passage de la tâche"]) --> E{"activé et<br/>réglages complets ?"}
+  E -- non --> I["Désactivé / incomplet<br/>certificat local seul"] --> W1["réveil au prochain<br/>changement de réglage"]
+  E -- oui --> L["Charger public-cert.pem<br/>s'il couvre le domaine"]
+  L --> P["Test de connexion<br/>TCP vers Let's Encrypt (5 s)"]
+  P --> A{"en ligne et<br/>IP locale changée ?"}
+  A -- oui --> DNSA["Mettre à jour l'enregistrement A"]
+  A -- non --> R
+  DNSA --> R{"certificat absent ou<br/>expire dans ≤ 30 jours ?"}
+  R -- non --> K["Actif · revérifier dans 6 h<br/>(ou pile à l'échéance)"]
+  R -- oui --> O{"internet ?"}
+  O -- non --> N["En attente d'internet<br/>repli local · réessai dans 5 min"]
+  O -- oui --> B{"échec récent ?"}
+  B -- oui --> BO["Patienter : 10 min, 20, 40…<br/>plafond 12 h"]
+  B -- non --> ACME["Demande ACME (DNS-01)"]
+  ACME -- ok --> S["Enregistrer, servir à chaud<br/>QR → domaine public"]
+  ACME -- échec --> F["Échec affiché<br/>repli local · backoff"]
+```
+
+Un changement de réglage réveille la tâche immédiatement. Au démarrage sans internet, un certificat Let's Encrypt encore valide est rechargé depuis le disque et servi tout de suite (TLS ne demande pas internet). Les fichiers de test (serveur *staging*) sont séparés de ceux de production.
+
+### Défi DNS-01
+
+```mermaid
+sequenceDiagram
+  participant S as Serveur PwaMote
+  participant LE as Let's Encrypt
+  participant D as DuckDNS / Cloudflare
+  participant R as Résolveur public (DoH)
+  S->>LE: compte (acme-account.json) + commande pour le domaine
+  LE-->>S: défi DNS-01
+  S->>D: TXT _acme-challenge.domaine = valeur
+  loop au plus 2 min
+    S->>R: le TXT est-il visible ?
+  end
+  S->>LE: défi prêt
+  LE->>D: lit le TXT
+  LE-->>S: domaine validé
+  S->>LE: CSR (nouvelle clé ECDSA)
+  LE-->>S: chaîne de certificats
+  S->>D: retire le TXT
+  S->>S: public-cert.pem + public-key.pem, servi à chaud
+```
+
+### Ce qu'il faut savoir
+
+- **Le téléphone doit résoudre le domaine** via le DNS public : il faut internet sur le réseau du téléphone. Sans internet, il reste l'IP et le certificat local.
+- **Protection anti-rebinding** : quelques box ou bloqueurs DNS (Pi-hole, certains routeurs) refusent un nom public qui pointe vers une IP privée. Il faut alors autoriser le domaine dans leur configuration, ou rester sur l'IP.
+- **Jetons** : stockés en clair dans `config.json` (`%APPDATA%\PwaMote`), comme le reste de la configuration. Préférer un jeton Cloudflare limité à une seule zone.
+- **Limites Let's Encrypt** : 5 échecs de validation par heure et par domaine ; d'où le backoff, et la case « serveur de test » pour essayer.
+
+### Premier lancement sans Let's Encrypt (autorité locale)
 
 ```mermaid
 flowchart TD
   A["Premier lancement"] --> B["Création de la CA locale<br/>%APPDATA%\\PwaMote\\ca-*.pem"]
-  B --> C["Chaque démarrage : certificat serveur<br/>nom mDNS + IP · 397 jours"]
+  B --> C["Chaque démarrage : certificat serveur<br/>nom mDNS + IP + domaine public · 397 jours"]
   C --> D["Le téléphone ouvre /pwamote.mobileconfig"]
   D --> E["Réglages iOS › Profil téléchargé › Installer"]
   E --> F["Réglages › Général › Informations › Réglages des certificats<br/>activer la confiance totale pour « PwaMote Local CA »"]
@@ -455,6 +536,7 @@ Limites connues : le caret n'est lisible que pour les applications Win32 classiq
 | Client | PWA, Vite, Solid, TypeScript | iPhone sans compilation native, multiplateforme, 42 Ko de JS |
 | Serveur | Rust, tokio, axum, rustls (ring) | binaire unique, faible latence, pas de dépendance C à compiler |
 | Types partagés | `ts-rs` | une seule définition du protocole, vérifiée par la CI |
+| Certificat public | Let's Encrypt via `instant-acme`, défi DNS-01 (DuckDNS, Cloudflare via `reqwest`), repli autorité locale (`rcgen`) | domaine public obligatoire pour LE ; DNS-01 n'exige pas d'ouvrir le PC sur internet |
 | Découverte | mDNS (`mdns-sd`) + QR | un navigateur ne peut pas scanner le réseau ; le nom `.local` reste stable si l'IP change |
 | Injection | `SendInput` (crate `windows`) | API officielle, texte en Unicode (accents, emoji) |
 | Tests | `cargo test`, Vitest, Playwright | cœur et sessions sans OS, client avec faux WebSocket |

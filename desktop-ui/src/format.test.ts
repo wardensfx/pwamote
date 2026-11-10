@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AppConfig } from "../../client/src/generated/AppConfig";
 import type { Candidate } from "../../client/src/generated/Candidate";
-import { countdown, isValidHost, phonesLabel, relativeTime, selectedAddress } from "./format";
+import type { PublicCertStatus } from "../../client/src/generated/PublicCertStatus";
+import { countdown, isValidHost, phonesLabel, publicCertSummary, relativeTime, selectedAddress } from "./format";
 
 const candidates: Candidate[] = [
   { choice: { kind: "auto" }, host: "192.168.1.20", label: "192.168.1.20", recommended: true },
@@ -10,6 +11,7 @@ const candidates: Candidate[] = [
 ];
 const cfg = (address: AppConfig["address"]): AppConfig => ({
   port: 8443, server_enabled: true, address, launch_at_login: false, start_minimized: false, close_to_tray: true,
+  public_cert: { enabled: false, domain: "", email: "", provider: { kind: "duck_dns", token: "" }, staging: false },
 });
 
 describe("selectedAddress", () => {
@@ -56,5 +58,33 @@ describe("countdown et pluriels", () => {
     expect(phonesLabel(0)).toBe("Aucun téléphone connecté");
     expect(phonesLabel(1)).toBe("1 téléphone connecté");
     expect(phonesLabel(3)).toBe("3 téléphones connectés");
+  });
+});
+
+describe("publicCertSummary", () => {
+  const base: PublicCertStatus = { phase: "disabled", domain: null, message: null, expires_at: null, next_check_at: null, online: null, staging: false };
+  const now = 1_800_000_000;
+
+  it("désactivé : repli sur le profil local", () => {
+    expect(publicCertSummary(base, now).tone).toBe("off");
+  });
+
+  it("actif : jours restants et serveur de test signalé", () => {
+    const s = publicCertSummary({ ...base, phase: "active", expires_at: now + 45 * 86400, staging: true }, now);
+    expect(s.tone).toBe("ok");
+    expect(s.title).toBe("Let's Encrypt (serveur de test) · valide encore 45 j");
+  });
+
+  it("actif avec avertissement : ton d'attente et message affiché", () => {
+    const s = publicCertSummary({ ...base, phase: "active", expires_at: now + 20 * 86400, message: "Renouvellement en attente d'une connexion internet." }, now);
+    expect(s.tone).toBe("wait");
+    expect(s.detail).toContain("internet");
+  });
+
+  it("échec : message et délai avant le prochain essai", () => {
+    const s = publicCertSummary({ ...base, phase: "failed", message: "Let's Encrypt : refus.", next_check_at: now + 600 }, now);
+    expect(s.tone).toBe("error");
+    expect(s.detail).toBe("Let's Encrypt : refus. Nouvel essai dans 10 min.");
+    expect(publicCertSummary({ ...base, phase: "failed", next_check_at: now + 4 * 3600 }, now).detail).toContain("4 h");
   });
 });

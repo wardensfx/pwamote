@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { DeckEditor } from "./DeckEditor";
+import { PublicCertCard } from "./PublicCert";
 import { countdown, isValidHost, phonesLabel, relativeTime, selectedAddress } from "./format";
 import type { AppConfig, Backend, DeviceView, PairingInfo, ServerStatus } from "./ipc";
 
@@ -260,7 +261,7 @@ export function App(props: { backend: Backend }) {
                 </button>
               </div>
 
-              <details>
+              <details hidden={s().public_cert.phase === "active"}>
                 <summary>Première fois sur un iPhone ?</summary>
                 <ol>
                   <li>
@@ -305,6 +306,13 @@ export function App(props: { backend: Backend }) {
                 </For>
               </Show>
             </section>
+
+            <PublicCertCard
+              config={s().config.public_cert}
+              status={s().public_cert}
+              now={now()}
+              onSave={async (public_cert) => apply({ public_cert })}
+            />
 
             <section class="glass options">
               <h2>Options</h2>

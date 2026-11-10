@@ -41,6 +41,10 @@ Le gyroscope n'est disponible qu'en HTTPS. Le serveur crée sa propre autorité 
 
 Ajoutez ensuite la page à l'écran d'accueil (Partager › Sur l'écran d'accueil) pour l'avoir en plein écran.
 
+### Sans profil : certificat Let's Encrypt
+
+Fenêtre PwaMote › **Certificat Let's Encrypt** : activez, choisissez **DuckDNS** (sous-domaine gratuit `xxx.duckdns.org` + jeton du compte) ou **Cloudflare** (votre domaine + jeton d'API « DNS : Modifier »), puis enregistrez. PwaMote fait pointer ce nom vers l'IP locale du PC, obtient le certificat par le défi DNS (le PC n'est pas exposé sur internet), le renouvelle 30 jours avant l'échéance et revient au certificat local tant qu'internet manque. Le QR code utilise alors ce nom : plus besoin du profil. Détails et limites dans [docs/architecture.md](docs/architecture.md#https--lets-encrypt-avec-repli-sur-lautorité-locale).
+
 ### Le téléphone ne trouve pas le PC
 
 Si la fenêtre indique « En ligne » mais que le téléphone n'arrive pas à se connecter, ouvrez `https://<IP du PC>:8443/healthz` dans Safari. Si la page ne se charge pas, le pare-feu Windows bloque probablement l'exécutable (fréquent après une recompilation : `target\release\pwamote-desktop.exe` est un nouveau programme pour Windows). Le bouton **Autoriser dans le pare-feu** de la fenêtre crée, après confirmation administrateur, une règle entrante TCP limitée au réseau local pour cet exécutable. Côté téléphone, Réglages › Appareil permet toujours de réessayer, de rescanner un QR code ou de recharger la dernière version de l'app.
