@@ -45,18 +45,6 @@ export function App(props: { backend: Backend }) {
   const [portDraft, setPortDraft] = createSignal<string | null>(null);
   const [tab, setTab] = createSignal<"connection" | "actions">("connection");
   const [deckDirty, setDeckDirty] = createSignal(false);
-  const [firewall, setFirewall] = createSignal<{ busy: boolean; text: string; error: boolean }>({ busy: false, text: "", error: false });
-
-  const allowFirewall = async () => {
-    setFirewall({ busy: true, text: "Windows va demander une autorisation…", error: false });
-    try {
-      await be.allowFirewall();
-      setFirewall({ busy: false, text: "C'est fait : les téléphones du réseau local peuvent joindre PwaMote.", error: false });
-    } catch (e) {
-      setFirewall({ busy: false, text: String(e), error: true });
-    }
-  };
-
   // Ne remplace l'état que s'il a vraiment changé : sinon la liste d'adresses et le QR se redessinent
   // à chaque interrogation périodique.
   const updateStatus = (next: ServerStatus) => {
@@ -228,7 +216,85 @@ export function App(props: { backend: Backend }) {
                 <div class="expiry">Code valable encore {countdown(expiresIn())} · à usage unique</div>
               </Show>
 
-              <label class="field-label" for="addr">Adresse encodée dans le QR code</label>
+              <div class="actions">
+                <button class="btn ghost small" onClick={copy} disabled={!pairing()}>
+                  {copied() ? "Copié" : "Copier le lien"}
+                </button>
+                <button class="btn ghost small" onClick={refreshPairing} disabled={!s().running}>
+                  Nouveau code
+                </button>
+              </div>
+
+              <details hidden={s().public_cert.phase === "active"}>
+                <summary>Première fois sur un iPhone ?</summary>
+                <ol>
+                  <li>
+                    Sur le téléphone, ouvrez <span class="mono">{s().origin ?? "…"}/pwamote.mobileconfig</span> et autorisez le téléchargement.
+                  </li>
+                  <li>Réglages › Profil téléchargé › Installer.</li>
+                  <li>Réglages › Général › Informations › Réglages des certificats : activez la confiance pour « PwaMote Local CA ».</li>
+                  <li>Scannez ensuite le QR code ci-dessus.</li>
+                </ol>
+              </details>
+
+            </section>
+
+            <section class="glass devices">
+              <h2>Appareils associés</h2>
+              <Show when={devices().length > 0} fallback={<p class="empty">Aucun appareil pour l'instant.</p>}>
+                <For each={devices()}>
+                  {(d) => (
+                    <div class="device">
+                      <div>
+                        <div class="row-title">{d.name}</div>
+                        <div class="row-hint">Vu {relativeTime(now(), d.last_seen)}</div>
+                      </div>
+                      <button class="btn danger small" onClick={async () => (await be.revokeDevice(d.id), setDevices(await be.listDevices()))}>
+                        Retirer
+                      </button>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </section>
+
+            <details class="advanced">
+              <summary>Paramètres avancés</summary>
+              <div class="advanced-body">
+            <PublicCertCard
+              config={s().config.public_cert}
+              status={s().public_cert}
+              now={now()}
+              onSave={async (public_cert) => apply({ public_cert })}
+            />
+
+            <section class="glass options">
+              <h2>Options</h2>
+              <Row title="Lancer avec Windows" hint="PwaMote démarre à l'ouverture de votre session.">
+                <Toggle checked={s().config.launch_at_login} label="Lancer avec Windows" onChange={(v) => apply({ launch_at_login: v })} />
+              </Row>
+              <Row title="Démarrer réduit" hint="Au lancement, reste dans la barre système sans ouvrir cette fenêtre.">
+                <Toggle checked={s().config.start_minimized} label="Démarrer réduit" onChange={(v) => apply({ start_minimized: v })} />
+              </Row>
+              <Row title="Réduire dans la barre système à la fermeture" hint="Sinon, fermer la fenêtre quitte PwaMote.">
+                <Toggle checked={s().config.close_to_tray} label="Réduire à la fermeture" onChange={(v) => apply({ close_to_tray: v })} />
+              </Row>
+              <Row title="Port" hint="Entre 1024 et 65535. Le serveur redémarre.">
+                <input
+                  class="port"
+                  inputmode="numeric"
+                  value={portValue()}
+                  onInput={(e) => setPortDraft(e.currentTarget.value)}
+                  onBlur={commitPort}
+                  onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                  aria-label="Port"
+                />
+              </Row>
+            </section>
+
+            <section class="glass options">
+              <h2>Adresse</h2>
+              <label class="field-label" for="addr">Adresse locale (QR code sans certificat public)</label>
               <select
                 id="addr"
                 value={customMode() ? "custom" : selectedAddress(s().config, s().candidates)}
@@ -264,91 +330,10 @@ export function App(props: { backend: Backend }) {
                 si l'IP change, mais dépend du mDNS.
               </p>
 
-              <div class="actions">
-                <button class="btn ghost small" onClick={copy} disabled={!pairing()}>
-                  {copied() ? "Copié" : "Copier le lien"}
-                </button>
-                <button class="btn ghost small" onClick={refreshPairing} disabled={!s().running}>
-                  Nouveau code
-                </button>
+            </section>
+
               </div>
-
-              <details hidden={s().public_cert.phase === "active"}>
-                <summary>Première fois sur un iPhone ?</summary>
-                <ol>
-                  <li>
-                    Sur le téléphone, ouvrez <span class="mono">{s().origin ?? "…"}/pwamote.mobileconfig</span> et autorisez le téléchargement.
-                  </li>
-                  <li>Réglages › Profil téléchargé › Installer.</li>
-                  <li>Réglages › Général › Informations › Réglages des certificats : activez la confiance pour « PwaMote Local CA ».</li>
-                  <li>Scannez ensuite le QR code ci-dessus.</li>
-                </ol>
-              </details>
-
-              <div class="firewall">
-                <p class="hint">
-                  Le téléphone ne trouve pas le PC, ou plus depuis une recompilation ? Le pare-feu Windows bloque peut-être cet exécutable.
-                </p>
-                <button class="btn ghost small" disabled={firewall().busy} onClick={allowFirewall}>
-                  {firewall().busy ? "Autorisation…" : "Autoriser dans le pare-feu"}
-                </button>
-                <Show when={firewall().text}>
-                  <p class="hint" classList={{ error: firewall().error }}>
-                    {firewall().text}
-                  </p>
-                </Show>
-              </div>
-            </section>
-
-            <section class="glass devices">
-              <h2>Appareils associés</h2>
-              <Show when={devices().length > 0} fallback={<p class="empty">Aucun appareil pour l'instant.</p>}>
-                <For each={devices()}>
-                  {(d) => (
-                    <div class="device">
-                      <div>
-                        <div class="row-title">{d.name}</div>
-                        <div class="row-hint">Vu {relativeTime(now(), d.last_seen)}</div>
-                      </div>
-                      <button class="btn danger small" onClick={async () => (await be.revokeDevice(d.id), setDevices(await be.listDevices()))}>
-                        Retirer
-                      </button>
-                    </div>
-                  )}
-                </For>
-              </Show>
-            </section>
-
-            <PublicCertCard
-              config={s().config.public_cert}
-              status={s().public_cert}
-              now={now()}
-              onSave={async (public_cert) => apply({ public_cert })}
-            />
-
-            <section class="glass options">
-              <h2>Options</h2>
-              <Row title="Lancer avec Windows" hint="PwaMote démarre à l'ouverture de votre session.">
-                <Toggle checked={s().config.launch_at_login} label="Lancer avec Windows" onChange={(v) => apply({ launch_at_login: v })} />
-              </Row>
-              <Row title="Démarrer réduit" hint="Au lancement, reste dans la barre système sans ouvrir cette fenêtre.">
-                <Toggle checked={s().config.start_minimized} label="Démarrer réduit" onChange={(v) => apply({ start_minimized: v })} />
-              </Row>
-              <Row title="Réduire dans la barre système à la fermeture" hint="Sinon, fermer la fenêtre quitte PwaMote.">
-                <Toggle checked={s().config.close_to_tray} label="Réduire à la fermeture" onChange={(v) => apply({ close_to_tray: v })} />
-              </Row>
-              <Row title="Port" hint="Entre 1024 et 65535. Le serveur redémarre.">
-                <input
-                  class="port"
-                  inputmode="numeric"
-                  value={portValue()}
-                  onInput={(e) => setPortDraft(e.currentTarget.value)}
-                  onBlur={commitPort}
-                  onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-                  aria-label="Port"
-                />
-              </Row>
-            </section>
+            </details>
 
             </div>
 

@@ -311,3 +311,14 @@ footer { display: flex; flex-direction: column; gap: 4px; padding: 6px 6px 0; co
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+/* ---------- Paramètres avancés ---------- */
+details.advanced { margin-top: 2px; border-top: 0; padding-top: 0; }
+details.advanced > summary {
+  list-style: none; display: flex; align-items: center; gap: 8px; padding: 10px 4px; color: var(--ink-dim); font-size: 13px;
+}
+details.advanced > summary::-webkit-details-marker { display: none; }
+details.advanced > summary::before { content: "›"; display: inline-block; transition: transform 0.25s var(--spring); font-size: 16px; line-height: 1; }
+details.advanced[open] > summary::before { transform: rotate(90deg); }
+.advanced-body { display: flex; flex-direction: column; gap: 12px; }
+.options .field-label:first-of-type { margin-top: 4px; }

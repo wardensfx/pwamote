@@ -18,8 +18,6 @@ export interface Backend {
   setDeck(deck: Deck): Promise<Deck>;
   /** Exécute une action sur ce PC, avec les valeurs par défaut de ses champs. */
   testAction(id: string): Promise<void>;
-  /** Autorise cet exécutable dans le pare-feu Windows (demande l'élévation). */
-  allowFirewall(): Promise<void>;
   hasBackdrop(): Promise<boolean>;
   dataDir(): Promise<string>;
   onStatusChanged(cb: (s: ServerStatus) => void): Promise<() => void>;
@@ -40,7 +38,6 @@ async function tauriBackend(): Promise<Backend> {
     getDeck: () => invoke("get_deck"),
     setDeck: (deck) => invoke("set_deck", { deck }),
     testAction: (id) => invoke("test_action", { id }),
-    allowFirewall: () => invoke("allow_firewall"),
     hasBackdrop: () => invoke("has_backdrop"),
     dataDir: () => invoke("data_dir_path"),
     onStatusChanged: (cb) => listen<ServerStatus>("status-changed", (e) => cb(e.payload)),
