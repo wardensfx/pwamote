@@ -272,6 +272,17 @@ fn main() {
                 let app = handle.clone();
                 tauri::async_runtime::spawn(async move {
                     let ctx = app.state::<Ctx>();
+                    // Pare-feu d'abord : avec la règle en place, Windows ne bloque pas les
+                    // téléphones et n'affiche pas sa propre fenêtre à la première écoute.
+                    match tauri::async_runtime::spawn_blocking(
+                        pwamote_server::firewall::ensure_allowed,
+                    )
+                    .await
+                    {
+                        Ok(Ok(true)) => tracing::info!("PwaMote autorisé dans le pare-feu"),
+                        Ok(Err(e)) => tracing::warn!(error = %e, "pare-feu non réglé"),
+                        _ => {}
+                    }
                     // Une erreur (port occupé) reste visible dans la fenêtre via l'état.
                     let _ = ctx.supervisor.start().await;
                     let status = ctx.supervisor.status().await;

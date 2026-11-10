@@ -163,7 +163,7 @@ impl Maintainer {
         let resolver = &self.deps.resolver;
         let mut mem = self.memory.lock().await;
         let mut status = PublicCertStatus {
-            staging: cfg.staging,
+            staging: cfg.uses_staging(),
             ..Default::default()
         };
 
@@ -227,14 +227,14 @@ impl Maintainer {
         status.domain = Some(domain.clone());
 
         // Nouveau domaine (ou passage test ↔ production) : on repart de zéro.
-        let key = (domain.clone(), cfg.staging);
+        let key = (domain.clone(), cfg.uses_staging());
         if mem.key.as_ref() != Some(&key) {
             *mem = Memory {
                 key: Some(key),
                 ..Default::default()
             };
             resolver.clear_public();
-            if let Some(pem) = self.deps.store.load(&domain, cfg.staging) {
+            if let Some(pem) = self.deps.store.load(&domain, cfg.uses_staging()) {
                 if let Err(e) = resolver.set_public(&domain, &pem) {
                     tracing::warn!(error = %e, "certificat public enregistré inutilisable");
                 }
@@ -302,7 +302,7 @@ impl Maintainer {
                         "Demande du certificat à Let's Encrypt : validation DNS, une à deux minutes…",
                     );
                 }
-                tracing::info!(%domain, staging = cfg.staging, "demande de certificat Let's Encrypt");
+                tracing::info!(%domain, staging = cfg.uses_staging(), "demande de certificat Let's Encrypt");
                 let result = self
                     .deps
                     .issuer
@@ -312,7 +312,7 @@ impl Maintainer {
                         resolver
                             .set_public(&domain, &pem)
                             .map_err(|e| e.to_string())?;
-                        if let Err(e) = self.deps.store.save(&pem, cfg.staging) {
+                        if let Err(e) = self.deps.store.save(&pem, cfg.uses_staging()) {
                             tracing::warn!(error = %e, "certificat public non enregistré");
                         }
                         Ok(())

@@ -103,6 +103,12 @@ impl PublicCertConfig {
         None
     }
 
+    /// Serveur de test de Let's Encrypt : seulement en mode domaine personnel (la case n'existe
+    /// que là ; en automatique, il faut un vrai certificat reconnu par l'iPhone).
+    pub fn uses_staging(&self) -> bool {
+        self.mode == CertMode::Custom && self.staging
+    }
+
     /// Domaine réglé à la main et complet.
     pub fn is_custom_ready(&self) -> bool {
         self.mode == CertMode::Custom && self.missing().is_none()
@@ -227,6 +233,15 @@ mod tests {
                 token: "abc".into()
             }
         );
+    }
+
+    #[test]
+    fn the_test_server_is_ignored_in_automatic_mode() {
+        let mut c = duck("yann.duckdns.org", "t");
+        c.staging = true;
+        assert!(c.uses_staging());
+        c.mode = CertMode::Auto;
+        assert!(!c.uses_staging());
     }
 
     #[test]

@@ -38,7 +38,7 @@ impl LetsEncryptIssuer {
     }
 
     async fn account(&self, cfg: &PublicCertConfig) -> Result<Account, String> {
-        let path = self.store.account_path(cfg.staging);
+        let path = self.store.account_path(cfg.uses_staging());
         if let Ok(json) = std::fs::read_to_string(&path) {
             if let Ok(creds) = serde_json::from_str::<AccountCredentials>(&json) {
                 return Account::builder()
@@ -48,7 +48,7 @@ impl LetsEncryptIssuer {
                     .map_err(err);
             }
         }
-        let directory = if cfg.staging {
+        let directory = if cfg.uses_staging() {
             LetsEncrypt::Staging.url()
         } else {
             LetsEncrypt::Production.url()
@@ -76,7 +76,7 @@ impl LetsEncryptIssuer {
         if let Err(e) = write_atomic(&path, &json) {
             tracing::warn!(error = %e, "compte ACME non enregistré");
         }
-        tracing::info!(staging = cfg.staging, "compte Let's Encrypt créé");
+        tracing::info!(staging = cfg.uses_staging(), "compte Let's Encrypt créé");
         Ok(account)
     }
 
