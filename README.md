@@ -30,7 +30,7 @@ L'installeur Windows (`.exe`, installation par utilisateur) est produit par la C
 
 Mode ligne de commande, sans fenêtre : `cargo run --release -p pwamote-server`, puis `https://localhost:8443/admin/pair` pour le QR code.
 
-### Première fois sur iPhone : faire confiance au PC
+### Sans internet ou en mode local : faire confiance au PC
 
 Le gyroscope n'est disponible qu'en HTTPS. Le serveur crée sa propre autorité de certification ; il faut l'installer une fois (environ 30 secondes) :
 
@@ -41,9 +41,9 @@ Le gyroscope n'est disponible qu'en HTTPS. Le serveur crée sa propre autorité 
 
 Ajoutez ensuite la page à l'écran d'accueil (Partager › Sur l'écran d'accueil) pour l'avoir en plein écran.
 
-### Sans profil : certificat Let's Encrypt
+### HTTPS automatique (par défaut)
 
-Fenêtre PwaMote › **Certificat Let's Encrypt** : activez, choisissez **DuckDNS** (sous-domaine gratuit `xxx.duckdns.org` + jeton du compte) ou **Cloudflare** (votre domaine + jeton d'API « DNS : Modifier »), puis enregistrez. PwaMote fait pointer ce nom vers l'IP locale du PC, obtient le certificat par le défi DNS (le PC n'est pas exposé sur internet), le renouvelle 30 jours avant l'échéance et revient au certificat local tant qu'internet manque. Le QR code utilise alors ce nom : plus besoin du profil. Détails et limites dans [docs/architecture.md](docs/architecture.md#https--lets-encrypt-avec-repli-sur-lautorité-locale).
+Rien à faire : au premier lancement avec internet, PwaMote donne au PC un nom `xxxx.pwamote.app` qui pointe vers son IP locale, obtient un vrai certificat Let's Encrypt et le renouvelle seul. Le QR code utilise alors ce nom, et l'iPhone n'a **aucun profil à installer**. Sans internet, le certificat local (et le profil ci-dessus) prend le relais. Domaine personnel ou mode local seul : fenêtre PwaMote › **HTTPS de l'iPhone**. Détails dans [docs/architecture.md](docs/architecture.md), service DNS dans [relay/](relay/README.md).
 
 ### Le téléphone ne trouve pas le PC
 

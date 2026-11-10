@@ -5,6 +5,7 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::future::BoxFuture;
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::watch;
@@ -12,7 +13,7 @@ use tokio::task::JoinHandle;
 use ts_rs::TS;
 
 use super::acme::Issuer;
-use super::config::PublicCertConfig;
+use super::config::{CertMode, PublicCertConfig};
 use super::connectivity::Probe;
 use super::dns::DnsApi;
 use super::policy::{self, Plan};
@@ -69,7 +70,26 @@ impl Default for PublicCertStatus {
     }
 }
 
-pub type DnsFactory = Arc<dyn Fn(&PublicCertConfig) -> Option<Arc<dyn DnsApi>> + Send + Sync>;
+/// Le nom à certifier et le service DNS qui le gère.
+pub struct Target {
+    pub domain: String,
+    pub dns: Arc<dyn DnsApi>,
+}
+
+pub enum Resolved {
+    Ready(Target),
+    /// Inscription au service PwaMote impossible sans internet.
+    NeedsNetwork,
+    /// Réglages incomplets (mode domaine personnel), message en clair.
+    Incomplete(String),
+    /// L'inscription a échoué (service injoignable, refus…).
+    Failed(String),
+}
+
+/// Trouve le domaine à certifier selon le mode : `<id>.pwamote.app` ou domaine personnel.
+pub trait Targets: Send + Sync {
+    fn resolve<'a>(&'a self, cfg: &'a PublicCertConfig, online: bool) -> BoxFuture<'a, Resolved>;
+}
 pub type Clock = Arc<dyn Fn() -> OffsetDateTime + Send + Sync>;
 pub type Ipv4Provider = Arc<dyn Fn() -> Vec<Ipv4Addr> + Send + Sync>;
 
@@ -77,7 +97,7 @@ pub struct Deps {
     pub resolver: Arc<CertResolver>,
     pub store: CertStore,
     pub issuer: Arc<dyn Issuer>,
-    pub dns: DnsFactory,
+    pub targets: Arc<dyn Targets>,
     pub probe: Arc<dyn Probe>,
     pub ips: Ipv4Provider,
     pub clock: Clock,
@@ -91,6 +111,9 @@ struct Memory {
     last_failure: Option<OffsetDateTime>,
     last_error: Option<String>,
     published_ip: Option<Ipv4Addr>,
+    /// Échecs d'inscription au service PwaMote (indépendants du domaine, encore inconnu).
+    reg_failures: u32,
+    reg_last_failure: Option<OffsetDateTime>,
 }
 
 pub struct Maintainer {
@@ -126,45 +149,78 @@ impl Maintainer {
         let resolver = &self.deps.resolver;
         let mut mem = self.memory.lock().await;
         let mut status = PublicCertStatus {
-            domain: (!cfg.domain.is_empty()).then(|| cfg.domain.clone()),
             staging: cfg.staging,
             ..Default::default()
         };
 
-        if !cfg.enabled {
+        if cfg.mode == CertMode::Off {
             resolver.clear_public();
             *mem = Memory::default();
             return self.finish(status, now, policy::IDLE_POLL);
         }
-        if let Some(reason) = cfg.missing() {
-            resolver.clear_public();
-            *mem = Memory::default();
-            status.phase = PublicCertPhase::Incomplete;
-            status.message = Some(reason);
-            return self.finish(status, now, policy::IDLE_POLL);
+        if cfg.mode == CertMode::Custom {
+            status.domain = (!cfg.domain.is_empty()).then(|| cfg.domain.clone());
         }
 
+        // Une inscription vient d'échouer : patienter avant de réessayer.
+        if let Some(at) = mem.reg_last_failure {
+            let wait = policy::backoff(mem.reg_failures);
+            let elapsed: Duration = (now - at).try_into().unwrap_or(Duration::ZERO);
+            if elapsed < wait {
+                status.phase = PublicCertPhase::Failed;
+                status.message = mem.last_error.clone();
+                return self.finish(status, now, wait - elapsed);
+            }
+        }
+
+        let online = self.deps.probe.online().await;
+        status.online = Some(online);
+        let Target { domain, dns } = match self.deps.targets.resolve(cfg, online).await {
+            Resolved::Ready(t) => {
+                mem.reg_failures = 0;
+                mem.reg_last_failure = None;
+                t
+            }
+            Resolved::Incomplete(reason) => {
+                resolver.clear_public();
+                *mem = Memory::default();
+                status.phase = PublicCertPhase::Incomplete;
+                status.message = Some(reason);
+                return self.finish(status, now, policy::IDLE_POLL);
+            }
+            Resolved::NeedsNetwork => {
+                status.phase = PublicCertPhase::WaitingForNetwork;
+                status.message = Some(
+                    "Pas de connexion internet : le certificat local sert en attendant.".into(),
+                );
+                return self.finish(status, now, policy::OFFLINE_POLL);
+            }
+            Resolved::Failed(e) => {
+                tracing::warn!(error = %e, "inscription au service DNS PwaMote impossible");
+                mem.reg_failures += 1;
+                mem.reg_last_failure = Some(now);
+                mem.last_error = Some(e.clone());
+                status.phase = PublicCertPhase::Failed;
+                status.message = Some(e);
+                return self.finish(status, now, policy::backoff(mem.reg_failures));
+            }
+        };
+        status.domain = Some(domain.clone());
+
         // Nouveau domaine (ou passage test ↔ production) : on repart de zéro.
-        let key = (cfg.domain.clone(), cfg.staging);
+        let key = (domain.clone(), cfg.staging);
         if mem.key.as_ref() != Some(&key) {
             *mem = Memory {
                 key: Some(key),
                 ..Default::default()
             };
             resolver.clear_public();
-            if let Some(pem) = self.deps.store.load(&cfg.domain, cfg.staging) {
-                if let Err(e) = resolver.set_public(&cfg.domain, &pem) {
+            if let Some(pem) = self.deps.store.load(&domain, cfg.staging) {
+                if let Err(e) = resolver.set_public(&domain, &pem) {
                     tracing::warn!(error = %e, "certificat public enregistré inutilisable");
                 }
             }
         }
-
-        let Some(dns) = (self.deps.dns)(cfg) else {
-            status.phase = PublicCertPhase::Incomplete;
-            return self.finish(status, now, policy::IDLE_POLL);
-        };
-        let online = self.deps.probe.online().await;
-        status.online = Some(online);
 
         // L'adresse locale du PC peut changer (DHCP) : le domaine doit suivre.
         let mut address_warning = None;
@@ -173,7 +229,7 @@ impl Maintainer {
                 if mem.published_ip != Some(ip) {
                     match dns.set_address(ip).await {
                         Ok(()) => {
-                            tracing::info!(%ip, domain = %cfg.domain, "adresse DNS mise à jour");
+                            tracing::info!(%ip, %domain, "adresse DNS mise à jour");
                             mem.published_ip = Some(ip);
                         }
                         Err(e) => {
@@ -185,7 +241,7 @@ impl Maintainer {
             }
         }
 
-        let expiry = resolver.public_expiry(&cfg.domain);
+        let expiry = resolver.public_expiry(&domain);
         let valid = expiry.is_some_and(|t| t > now);
         status.expires_at = expiry.filter(|_| valid).map(unix);
         let base_phase = |fallback| {
@@ -220,15 +276,15 @@ impl Maintainer {
                 let mut obtaining = status.clone();
                 obtaining.phase = PublicCertPhase::Obtaining;
                 self.publish(obtaining);
-                tracing::info!(domain = %cfg.domain, staging = cfg.staging, "demande de certificat Let's Encrypt");
+                tracing::info!(%domain, staging = cfg.staging, "demande de certificat Let's Encrypt");
                 let result = self
                     .deps
                     .issuer
-                    .issue(cfg, dns.as_ref())
+                    .issue(&domain, cfg, dns.as_ref())
                     .await
                     .and_then(|pem| {
                         resolver
-                            .set_public(&cfg.domain, &pem)
+                            .set_public(&domain, &pem)
                             .map_err(|e| e.to_string())?;
                         if let Err(e) = self.deps.store.save(&pem, cfg.staging) {
                             tracing::warn!(error = %e, "certificat public non enregistré");
@@ -241,8 +297,8 @@ impl Maintainer {
                         mem.failures = 0;
                         mem.last_failure = None;
                         mem.last_error = None;
-                        let expiry = resolver.public_expiry(&cfg.domain);
-                        tracing::info!(domain = %cfg.domain, ?expiry, "certificat public obtenu");
+                        let expiry = resolver.public_expiry(&domain);
+                        tracing::info!(%domain, ?expiry, "certificat public obtenu");
                         status.phase = PublicCertPhase::Active;
                         status.expires_at = expiry.map(unix);
                         status.message = address_warning;
@@ -320,7 +376,8 @@ pub(crate) mod testing {
     impl Issuer for FakeIssuer {
         fn issue<'a>(
             &'a self,
-            cfg: &'a PublicCertConfig,
+            domain: &'a str,
+            _cfg: &'a PublicCertConfig,
             dns: &'a dyn DnsApi,
         ) -> BoxFuture<'a, Result<PemCert, String>> {
             Box::pin(async move {
@@ -330,7 +387,64 @@ pub(crate) mod testing {
                 if self.fail.load(Ordering::SeqCst) {
                     return Err("défi DNS invalide".into());
                 }
-                Ok(self.ca.issue(&cfg.domain, *self.days.lock().unwrap()))
+                Ok(self.ca.issue(domain, *self.days.lock().unwrap()))
+            })
+        }
+    }
+
+    /// Domaine personnel tel que réglé, ou inscription simulée au service PwaMote.
+    pub struct FakeTargets {
+        pub dns: Arc<super::super::dns::testing::FakeDns>,
+        pub registered: Mutex<Option<String>>,
+        pub registrations: AtomicUsize,
+        pub fail: AtomicBool,
+    }
+
+    impl FakeTargets {
+        pub fn new(dns: Arc<super::super::dns::testing::FakeDns>) -> Self {
+            Self {
+                dns,
+                registered: Mutex::new(None),
+                registrations: AtomicUsize::new(0),
+                fail: AtomicBool::new(false),
+            }
+        }
+        fn ready(&self, domain: String) -> Resolved {
+            Resolved::Ready(Target {
+                domain,
+                dns: self.dns.clone(),
+            })
+        }
+    }
+
+    impl Targets for FakeTargets {
+        fn resolve<'a>(
+            &'a self,
+            cfg: &'a PublicCertConfig,
+            online: bool,
+        ) -> BoxFuture<'a, Resolved> {
+            Box::pin(async move {
+                match cfg.mode {
+                    CertMode::Custom => match cfg.missing() {
+                        Some(m) => Resolved::Incomplete(m),
+                        None => self.ready(cfg.domain.clone()),
+                    },
+                    _ => {
+                        if let Some(d) = self.registered.lock().unwrap().clone() {
+                            return self.ready(d);
+                        }
+                        if !online {
+                            return Resolved::NeedsNetwork;
+                        }
+                        self.registrations.fetch_add(1, Ordering::SeqCst);
+                        if self.fail.load(Ordering::SeqCst) {
+                            return Resolved::Failed("service PwaMote injoignable".into());
+                        }
+                        let d = "k3x9f2ab7qzm.pwamote.app".to_string();
+                        *self.registered.lock().unwrap() = Some(d.clone());
+                        self.ready(d)
+                    }
+                }
             })
         }
     }
@@ -351,7 +465,7 @@ pub(crate) mod testing {
 mod tests {
     use super::super::config::DnsProvider;
     use super::super::dns::testing::FakeDns;
-    use super::testing::{FakeIssuer, FakeProbe};
+    use super::testing::{FakeIssuer, FakeProbe, FakeTargets};
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
@@ -361,6 +475,7 @@ mod tests {
         probe: Arc<FakeProbe>,
         issuer: Arc<FakeIssuer>,
         dns: Arc<FakeDns>,
+        targets: Arc<FakeTargets>,
         ips: Arc<Mutex<Vec<Ipv4Addr>>>,
         clock: Arc<Mutex<OffsetDateTime>>,
         resolver: Arc<CertResolver>,
@@ -389,14 +504,14 @@ mod tests {
         let ips = Arc::new(Mutex::new(vec!["192.168.1.20".parse().unwrap()]));
         let clock = Arc::new(Mutex::new(OffsetDateTime::now_utc()));
         let resolver = Arc::new(CertResolver::new());
-        let dns_for = dns.clone();
+        let targets = Arc::new(FakeTargets::new(dns.clone()));
         let ips_for = ips.clone();
         let clock_for = clock.clone();
         let m = Maintainer::new(Deps {
             resolver: resolver.clone(),
             store: CertStore::new(dir.path()),
             issuer: issuer.clone(),
-            dns: Arc::new(move |_| Some(dns_for.clone() as Arc<dyn DnsApi>)),
+            targets: targets.clone(),
             probe: probe.clone(),
             ips: Arc::new(move || ips_for.lock().unwrap().clone()),
             clock: Arc::new(move || *clock_for.lock().unwrap()),
@@ -406,6 +521,7 @@ mod tests {
             probe,
             issuer,
             dns,
+            targets,
             ips,
             clock,
             resolver,
@@ -416,17 +532,71 @@ mod tests {
 
     fn cfg() -> PublicCertConfig {
         PublicCertConfig {
-            enabled: true,
+            mode: CertMode::Custom,
             domain: "yann.duckdns.org".into(),
             provider: DnsProvider::DuckDns { token: "t".into() },
             ..Default::default()
         }
     }
 
+    fn off() -> PublicCertConfig {
+        PublicCertConfig {
+            mode: CertMode::Off,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn automatic_mode_registers_once_then_gets_a_certificate() {
+        let w = world(false);
+        let auto = PublicCertConfig::default();
+        // Sans internet : pas d'inscription possible, repli local.
+        assert_eq!(w.m.tick(&auto).await, policy::OFFLINE_POLL);
+        assert_eq!(w.m.status().phase, PublicCertPhase::WaitingForNetwork);
+        assert_eq!(w.targets.registrations.load(Ordering::SeqCst), 0);
+
+        w.set_online(true);
+        w.m.tick(&auto).await;
+        let st = w.m.status();
+        assert_eq!(st.phase, PublicCertPhase::Active, "{st:?}");
+        assert_eq!(st.domain.as_deref(), Some("k3x9f2ab7qzm.pwamote.app"));
+        assert_eq!(
+            w.resolver
+                .active_domain(*w.clock.lock().unwrap())
+                .as_deref(),
+            Some("k3x9f2ab7qzm.pwamote.app")
+        );
+        w.m.tick(&auto).await;
+        assert_eq!(w.targets.registrations.load(Ordering::SeqCst), 1);
+        assert_eq!(w.issuer.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_registration_backs_off_and_keeps_the_local_fallback() {
+        let w = world(true);
+        w.targets.fail.store(true, Ordering::SeqCst);
+        let auto = PublicCertConfig::default();
+        assert_eq!(w.m.tick(&auto).await, policy::backoff(1));
+        let st = w.m.status();
+        assert_eq!(st.phase, PublicCertPhase::Failed);
+        assert!(st.message.unwrap().contains("injoignable"));
+        w.advance(time::Duration::minutes(2));
+        w.m.tick(&auto).await;
+        assert_eq!(
+            w.targets.registrations.load(Ordering::SeqCst),
+            1,
+            "pas de nouvel essai trop tôt"
+        );
+        w.advance(time::Duration::minutes(9));
+        w.targets.fail.store(false, Ordering::SeqCst);
+        w.m.tick(&auto).await;
+        assert_eq!(w.m.status().phase, PublicCertPhase::Active);
+    }
+
     #[tokio::test]
     async fn disabled_or_incomplete_does_nothing() {
         let w = world(true);
-        let d = w.m.tick(&PublicCertConfig::default()).await;
+        let d = w.m.tick(&off()).await;
         assert_eq!(d, policy::IDLE_POLL);
         assert_eq!(w.m.status().phase, PublicCertPhase::Disabled);
 
@@ -574,7 +744,7 @@ mod tests {
         assert_eq!(w.m.status().phase, PublicCertPhase::WaitingForNetwork);
         assert_eq!(w.resolver.public_domain(), None);
 
-        w.m.tick(&PublicCertConfig::default()).await;
+        w.m.tick(&off()).await;
         assert_eq!(w.resolver.public_domain(), None);
     }
 
@@ -583,7 +753,7 @@ mod tests {
         let w = world(true);
         let issuer = w.issuer.clone();
         let m = Arc::new(w.m);
-        let (tx, rx) = watch::channel(PublicCertConfig::default());
+        let (tx, rx) = watch::channel(off());
         let task = m.clone().spawn(rx);
         tx.send(cfg()).unwrap();
         for _ in 0..100 {

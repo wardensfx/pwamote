@@ -18,7 +18,7 @@ use crate::mdns::{self, Announcer};
 use crate::net;
 use crate::public_cert::maintainer::Deps as PublicCertDeps;
 use crate::public_cert::{
-    cert::PemCert, config::is_public_domain, CertResolver, Maintainer, PublicCertConfig,
+    cert::PemCert, config::is_public_domain, CertMode, CertResolver, Maintainer, PublicCertConfig,
     PublicCertStatus,
 };
 use crate::state::{AppState, Persist};
@@ -111,7 +111,8 @@ pub enum SupervisorError {
 fn needs_restart(old: &AppConfig, new: &AppConfig) -> bool {
     old.port != new.port
         || old.address != new.address
-        || old.public_cert.domain != new.public_cert.domain
+        || (old.public_cert.mode, &old.public_cert.domain)
+            != (new.public_cert.mode, &new.public_cert.domain)
 }
 
 /// Hôte à mettre dans les liens : le domaine public s'il a un certificat valide, sinon l'adresse locale.
@@ -227,7 +228,10 @@ impl Supervisor {
         // Le certificat local couvre aussi le domaine public : si Let's Encrypt n'est pas
         // (encore) disponible, un téléphone qui a installé le profil y accède quand même.
         let domain = &cfg.public_cert.domain;
-        if is_public_domain(domain) && !names.contains(domain) {
+        if cfg.public_cert.mode == CertMode::Custom
+            && is_public_domain(domain)
+            && !names.contains(domain)
+        {
             names.push(domain.clone());
         }
         let leaf = self
@@ -477,7 +481,7 @@ mod tests {
     use crate::config::AddressChoice;
     use crate::public_cert::cert::testing::FakeCa;
     use crate::public_cert::dns::testing::FakeDns;
-    use crate::public_cert::maintainer::testing::{FakeIssuer, FakeProbe};
+    use crate::public_cert::maintainer::testing::{FakeIssuer, FakeProbe, FakeTargets};
     use crate::public_cert::{DnsProvider, PublicCertPhase};
     use crate::state::testing::fixture;
     use crate::state::MemoryPersist;
@@ -692,7 +696,7 @@ mod tests {
     fn with_domain() -> AppConfig {
         AppConfig {
             public_cert: PublicCertConfig {
-                enabled: true,
+                mode: CertMode::Custom,
                 domain: "yann.duckdns.org".into(),
                 provider: DnsProvider::DuckDns { token: "t".into() },
                 ..Default::default()
@@ -760,13 +764,15 @@ mod tests {
 
     #[tokio::test]
     async fn the_background_task_follows_the_config() {
-        let (sup, _p, _) = supervisor(ephemeral());
+        let mut off = ephemeral();
+        off.public_cert.mode = CertMode::Off;
+        let (sup, _p, _) = supervisor(off);
         let dir = tempfile::tempdir().unwrap();
         let sup = sup.with_public_cert(|resolver| PublicCertDeps {
             resolver,
             store: crate::public_cert::store::CertStore::new(dir.path()),
             issuer: Arc::new(FakeIssuer::new()),
-            dns: Arc::new(|_| Some(Arc::new(FakeDns::default()) as _)),
+            targets: Arc::new(FakeTargets::new(Arc::new(FakeDns::default()))),
             probe: Arc::new(FakeProbe(false.into())),
             ips: Arc::new(|| vec!["192.168.1.20".parse().unwrap()]),
             clock: Arc::new(time::OffsetDateTime::now_utc),
@@ -786,6 +792,10 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(phase, PublicCertPhase::WaitingForNetwork);
+        assert_eq!(
+            sup.status().await.public_cert.domain.as_deref(),
+            Some("yann.duckdns.org")
+        );
         sup.stop().await;
     }
 

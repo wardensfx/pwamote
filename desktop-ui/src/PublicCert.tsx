@@ -1,5 +1,6 @@
 import { Show, createEffect, createSignal, on } from "solid-js";
 import { publicCertSummary } from "./format";
+import type { CertMode } from "../../client/src/generated/CertMode";
 import type { PublicCertConfig } from "../../client/src/generated/PublicCertConfig";
 import type { PublicCertStatus } from "../../client/src/generated/PublicCertStatus";
 
@@ -7,9 +8,16 @@ type ProviderKind = "duck_dns" | "cloudflare";
 
 const tokenOf = (c: PublicCertConfig) => (c.provider.kind === "duck_dns" ? c.provider.token : c.provider.api_token);
 
+const MODES: { mode: CertMode; label: string }[] = [
+  { mode: "auto", label: "Automatique" },
+  { mode: "custom", label: "Mon domaine" },
+  { mode: "off", label: "Local seul" },
+];
+
 /**
- * Certificat Let's Encrypt : réglages (domaine, service DNS, jeton) et état de la tâche de fond.
- * Le formulaire est un brouillon : rien ne part au serveur avant « Enregistrer ».
+ * HTTPS de l'iPhone. Par défaut automatique : le PC reçoit un nom `<id>.pwamote.app` et un
+ * certificat Let's Encrypt, sans rien régler. Le domaine personnel reste possible ; « Local seul »
+ * garde l'autorité locale (profil à installer sur l'iPhone).
  */
 export function PublicCertCard(props: {
   config: PublicCertConfig;
@@ -38,18 +46,18 @@ export function PublicCertCard(props: {
     ),
   );
 
-  const draft = (enabled: boolean): PublicCertConfig => ({
-    enabled,
+  const draft = (mode: CertMode): PublicCertConfig => ({
+    mode,
     domain: domain().trim().toLowerCase(),
     email: email().trim(),
     staging: staging(),
     provider: kind() === "duck_dns" ? { kind: "duck_dns", token: token().trim() } : { kind: "cloudflare", api_token: token().trim() },
   });
-  const dirty = () => JSON.stringify(draft(props.config.enabled)) !== JSON.stringify(props.config);
-  const save = async (enabled: boolean) => {
+  const dirty = () => JSON.stringify(draft(props.config.mode)) !== JSON.stringify(props.config);
+  const save = async (mode: CertMode) => {
     setSaving(true);
     try {
-      await props.onSave(draft(enabled));
+      await props.onSave(draft(mode));
     } finally {
       setSaving(false);
     }
@@ -58,18 +66,15 @@ export function PublicCertCard(props: {
 
   return (
     <section class="glass cert">
-      <div class="row">
-        <div class="row-text">
-          <h2>Votre propre domaine</h2>
-          <div class="row-hint">Facultatif. Un certificat Let's Encrypt pour un nom de domaine public que vous contrôlez (DuckDNS, Cloudflare).</div>
-        </div>
-        <label class="switch" aria-label="Utiliser votre propre domaine">
-          <input type="checkbox" role="switch" checked={props.config.enabled} disabled={saving()} onChange={(e) => void save(e.currentTarget.checked)} />
-          <i />
-        </label>
+      <h2>HTTPS de l'iPhone</h2>
+      <div class="segmented three" role="radiogroup" aria-label="Certificat">
+        {MODES.map((m) => (
+          <button role="radio" aria-checked={props.config.mode === m.mode} disabled={saving()} onClick={() => props.config.mode !== m.mode && void save(m.mode)}>
+            {m.label}
+          </button>
+        ))}
       </div>
 
-      <Show when={props.config.enabled}>
       <div class="cert-state" data-tone={summary().tone}>
         <span class="dot" />
         <div>
@@ -79,6 +84,15 @@ export function PublicCertCard(props: {
           </Show>
         </div>
       </div>
+
+      <Show when={props.config.mode === "auto"}>
+        <p class="hint">
+          Rien à régler : PwaMote donne à ce PC un nom privé en <span class="mono">pwamote.app</span> qui pointe vers son adresse sur votre réseau, avec un
+          vrai certificat. Le PC n'est jamais ouvert sur internet ; sans connexion, le certificat local prend le relais.
+        </p>
+      </Show>
+
+      <Show when={props.config.mode === "custom"}>
         <div class="segmented" role="radiogroup" aria-label="Service DNS">
           <button role="radio" aria-checked={kind() === "duck_dns"} onClick={() => setKind("duck_dns")}>
             DuckDNS <span>gratuit</span>
@@ -110,25 +124,10 @@ export function PublicCertCard(props: {
         </label>
 
         <div class="actions">
-          <button class="btn small" disabled={!dirty() || saving()} onClick={() => void save(true)}>
+          <button class="btn small" disabled={!dirty() || saving()} onClick={() => void save("custom")}>
             {saving() ? "Enregistrement…" : "Enregistrer"}
           </button>
         </div>
-
-        <details>
-          <summary>Comment ça marche ?</summary>
-          <ol>
-            <li>
-              {kind() === "duck_dns"
-                ? "Créez un sous-domaine gratuit sur duckdns.org et copiez le jeton du compte."
-                : "Créez un jeton d'API limité à la zone de votre domaine, droit DNS : Modifier."}
-            </li>
-            <li>PwaMote fait pointer ce nom vers l'adresse du PC sur votre réseau local et le tient à jour si elle change.</li>
-            <li>Le certificat est obtenu par le défi DNS : le PC n'a jamais besoin d'être joignable depuis internet.</li>
-            <li>Sans internet, le certificat local prend le relais ; PwaMote vérifie la connexion toutes les 5 minutes et renouvelle 30 jours avant l'échéance.</li>
-            <li>Une fois le certificat obtenu, le QR code utilise ce nom. Les téléphones déjà associés par IP continuent de fonctionner.</li>
-          </ol>
-        </details>
       </Show>
     </section>
   );

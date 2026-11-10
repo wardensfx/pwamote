@@ -18,9 +18,11 @@ pub mod connectivity;
 pub mod dns;
 pub mod maintainer;
 pub mod policy;
+pub mod relay;
 pub mod resolver;
 pub mod store;
+pub mod targets;
 
-pub use config::{DnsProvider, PublicCertConfig};
+pub use config::{CertMode, DnsProvider, PublicCertConfig};
 pub use maintainer::{Maintainer, PublicCertPhase, PublicCertStatus};
 pub use resolver::CertResolver;

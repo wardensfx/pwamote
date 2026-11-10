@@ -542,7 +542,7 @@ mod tests {
     #[test]
     fn provider_is_built_only_from_a_complete_config() {
         let mut cfg = PublicCertConfig {
-            enabled: true,
+            mode: super::super::config::CertMode::Custom,
             domain: "yann.duckdns.org".into(),
             ..Default::default()
         };

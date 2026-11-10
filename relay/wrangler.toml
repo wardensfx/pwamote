@@ -1,0 +1,19 @@
+# Service DNS de PwaMote. Mise en service : voir README.md de ce dossier.
+name = "pwamote-relay"
+main = "src/index.ts"
+compatibility_date = "2025-10-01"
+routes = [{ pattern = "dns.pwamote.app", custom_domain = true }]
+
+[vars]
+ZONE_NAME = "pwamote.app"
+# Identifiant de la zone pwamote.app (tableau de bord Cloudflare › pwamote.app › colonne de droite).
+ZONE_ID = "A_RENSEIGNER"
+
+[[kv_namespaces]]
+binding = "DEVICES"
+# Créé par : npx wrangler kv namespace create DEVICES
+id = "A_RENSEIGNER"
+
+# Ménage hebdomadaire des PC disparus depuis plus de 180 jours.
+[triggers]
+crons = ["17 3 * * 1"]

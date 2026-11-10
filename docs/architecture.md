@@ -163,15 +163,40 @@ sequenceDiagram
 
 ## HTTPS : Let's Encrypt, avec repli sur l'autorité locale
 
-Safari n'expose le gyroscope et ne permet l'installation hors-ligne qu'en HTTPS. Deux certificats coexistent :
+Safari n'expose le gyroscope et ne permet l'installation hors-ligne qu'en HTTPS. Objectif : **on lance, ça marche**, sans rien installer sur l'iPhone. Or Let's Encrypt ne signe que des **noms de domaine publics** (ni IP, ni `.local`), et iOS n'accepte une autorité locale qu'après installation manuelle d'un profil (règle d'Apple ; Caddy n'y échappe que parce que le navigateur tourne sur le même PC). D'où le modèle de `plex.direct` :
 
-- **Autorité locale** (toujours là, par défaut) : créée au premier lancement, elle signe un certificat pour `pwamote-<machine>.local`, les IP du PC et le domaine public s'il est configuré. Ce certificat est **conservé d'un lancement à l'autre** : une exception acceptée dans Safari reste valable après un redémarrage. Pour une confiance complète (PWA installée, hors-ligne), l'iPhone installe le profil une fois.
-- **Let's Encrypt** (facultatif) : un vrai certificat, reconnu partout, **sans profil à installer**. Let's Encrypt ne signe que des **noms de domaine publics** dont on prouve la maîtrise : ni IP, ni `.local`. PwaMote utilise donc le **défi DNS-01** sur un domaine choisi par l'utilisateur, dont l'enregistrement A pointe vers l'**IP locale** du PC. Le PC n'a jamais besoin d'être joignable depuis internet.
+| Mode | Nom servi | Réglage | iPhone |
+|---|---|---|---|
+| **Automatique** (par défaut) | `<id>.pwamote.app`, attribué par le [service DNS PwaMote](../relay/README.md) | aucun | rien à installer |
+| Mon domaine | `pc.mondomaine.fr` (Cloudflare) ou `xxx.duckdns.org` | domaine + jeton | rien à installer |
+| Local seul | IP, `pwamote-<machine>.local` | aucun | profil à installer une fois |
 
-| Service DNS | Domaine | Ce qu'il faut |
-|---|---|---|
-| DuckDNS (gratuit) | `xxx.duckdns.org` | le jeton du compte |
-| Cloudflare | votre domaine (`pc.mondomaine.fr`) | un jeton d'API limité à la zone, droit DNS : Modifier |
+Dans les deux premiers modes, le nom pointe vers l'**IP locale** du PC et le certificat est obtenu par le **défi DNS-01** : le PC n'a jamais besoin d'être joignable depuis internet. L'**autorité locale** reste toujours en place pour l'IP, le `.local` et le repli hors-ligne ; son certificat est **conservé d'un lancement à l'autre** (une exception acceptée dans Safari reste valable).
+
+L'identifiant est aléatoire (12 caractères, `k3x9f2ab7qzm`) et ne contient pas le nom du PC : chaque certificat Let's Encrypt est publié dans les journaux publics *Certificate Transparency*.
+
+### Mode automatique : inscription et publication
+
+```mermaid
+sequenceDiagram
+  participant PC as Serveur PwaMote
+  participant R as dns.pwamote.app (Worker)
+  participant CF as DNS Cloudflare (pwamote.app)
+  participant LE as Let's Encrypt
+  PC->>R: POST /v1/register (une seule fois)
+  R-->>PC: id, secret, k3x9f2ab7qzm.pwamote.app (relay.json)
+  PC->>R: PUT /v1/address 192.168.1.20 (réseaux privés seulement)
+  R->>CF: A k3x9f2ab7qzm → 192.168.1.20
+  PC->>LE: commande pour k3x9f2ab7qzm.pwamote.app
+  LE-->>PC: défi DNS-01
+  PC->>R: PUT /v1/challenge
+  R->>CF: TXT _acme-challenge.k3x9f2ab7qzm
+  LE->>CF: lit le TXT
+  LE-->>PC: certificat (clé restée sur le PC)
+  PC->>R: DELETE /v1/challenge
+```
+
+Le service ne voit jamais la clé privée ni le trafic. Il refuse toute adresse publique : un nom `pwamote.app` ne peut pas servir à imiter un site sur internet.
 
 ### Choix du certificat à chaque connexion
 
@@ -190,11 +215,14 @@ Le **QR code** encode le domaine public dès qu'un certificat Let's Encrypt vali
 
 ```mermaid
 flowchart TD
-  T(["Passage de la tâche"]) --> E{"activé et<br/>réglages complets ?"}
-  E -- non --> I["Désactivé / incomplet<br/>certificat local seul"] --> W1["réveil au prochain<br/>changement de réglage"]
-  E -- oui --> L["Charger public-cert.pem<br/>s'il couvre le domaine"]
-  L --> P["Test de connexion<br/>TCP vers Let's Encrypt (5 s)"]
-  P --> A{"en ligne et<br/>IP locale changée ?"}
+  T(["Passage de la tâche"]) --> E{"mode Local seul, ou<br/>domaine perso incomplet ?"}
+  E -- oui --> I["Certificat local seul"] --> W1["réveil au prochain<br/>changement de réglage"]
+  E -- non --> P0["Test de connexion<br/>TCP vers Let's Encrypt (5 s)"]
+  P0 --> G{"mode automatique<br/>et pas encore inscrit ?"}
+  G -- "oui, hors ligne" --> N0["En attente d'internet<br/>repli local · 5 min"]
+  G -- "oui, en ligne" --> REG["Inscription à dns.pwamote.app<br/>(backoff si échec)"] --> L
+  G -- non --> L["Charger public-cert.pem<br/>s'il couvre le domaine"]
+  L --> A{"en ligne et<br/>IP locale changée ?"}
   A -- oui --> DNSA["Mettre à jour l'enregistrement A"]
   A -- non --> R
   DNSA --> R{"certificat absent ou<br/>expire dans ≤ 30 jours ?"}
@@ -237,8 +265,8 @@ sequenceDiagram
 
 - **Le téléphone doit résoudre le domaine** via le DNS public : il faut internet sur le réseau du téléphone. Sans internet, il reste l'IP et le certificat local.
 - **Protection anti-rebinding** : quelques box ou bloqueurs DNS (Pi-hole, certains routeurs) refusent un nom public qui pointe vers une IP privée. Il faut alors autoriser le domaine dans leur configuration, ou rester sur l'IP.
-- **Jetons** : stockés en clair dans `config.json` (`%APPDATA%\PwaMote`), comme le reste de la configuration. Préférer un jeton Cloudflare limité à une seule zone.
-- **Limites Let's Encrypt** : 5 échecs de validation par heure et par domaine ; d'où le backoff, et la case « serveur de test » pour essayer.
+- **Jetons (mode Mon domaine)** : stockés en clair dans `config.json` (`%APPDATA%\PwaMote`), comme le reste de la configuration. Préférer un jeton Cloudflare limité à une seule zone.
+- **Limites Let's Encrypt** : 5 échecs de validation par heure et par domaine ; d'où le backoff, et la case « serveur de test » pour essayer. En mode automatique, 50 nouveaux certificats par semaine pour tout `pwamote.app` (renouvellements exclus) ; au-delà, Public Suffix List (voir `relay/README.md`).
 
 ### Premier lancement sans Let's Encrypt (autorité locale)
 

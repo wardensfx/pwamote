@@ -1,0 +1,17 @@
+{
+  "name": "pwamote-relay",
+  "private": true,
+  "type": "module",
+  "description": "Service DNS de PwaMote : un nom <id>.pwamote.app par PC, pointant vers son IP locale, et le défi DNS-01 de Let's Encrypt.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261029.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "wrangler": "4.150.0"
+  }
+}

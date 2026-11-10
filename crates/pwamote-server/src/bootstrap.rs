@@ -96,20 +96,28 @@ pub fn open(dir: PathBuf) -> Result<Opened, Box<dyn std::error::Error + Send + S
     })
 }
 
-/// Vrais services : Let's Encrypt, DuckDNS/Cloudflare, test de connexion TCP, horloge système.
+/// Vrais services : Let's Encrypt, service DNS PwaMote (ou DuckDNS/Cloudflare), test de
+/// connexion TCP, horloge système.
 fn public_cert_deps(
     dir: &std::path::Path,
     resolver: Arc<crate::public_cert::CertResolver>,
     ips: IpProvider,
 ) -> crate::public_cert::maintainer::Deps {
-    use crate::public_cert::{acme, connectivity, dns, store::CertStore};
+    use crate::public_cert::{acme, connectivity, dns, relay, store::CertStore, targets};
     let http = dns::http_client();
     let store = CertStore::new(dir);
     crate::public_cert::maintainer::Deps {
         resolver,
         issuer: Arc::new(acme::LetsEncryptIssuer::new(store.clone(), http.clone())),
         store,
-        dns: Arc::new(move |cfg| dns::for_config(cfg, http.clone())),
+        targets: Arc::new(targets::SystemTargets {
+            relay: relay::RelayClient::new(
+                http.clone(),
+                &relay::relay_url(),
+                dir.join("relay.json"),
+            ),
+            http,
+        }),
         probe: Arc::new(connectivity::TcpProbe::default()),
         ips,
         clock: Arc::new(time::OffsetDateTime::now_utc),

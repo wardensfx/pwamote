@@ -63,12 +63,13 @@ export function publicCertSummary(s: PublicCertStatus, now: number): { tone: Cer
     case "waiting_for_network":
       return { tone: "wait", title: "En attente d'internet", detail: s.message ?? "Le certificat local sert en attendant." };
     case "obtaining":
-      return { tone: "wait", title: `Demande à Let's Encrypt en cours${test}…`, detail: "Publication du défi DNS puis validation, une à deux minutes." };
+      return { tone: "wait", title: `Demande à Let's Encrypt en cours${test}…`, detail: `${s.domain ?? ""} · une à deux minutes.` };
     case "failed":
       return { tone: "error", title: "Certificat non obtenu", detail: `${s.message ?? ""}${retryIn(s, now)}` };
     case "active": {
       const until = s.expires_at ? `valide encore ${daysLeft(now, s.expires_at)}` : "valide";
-      return { tone: s.message ? "wait" : "ok", title: `Let's Encrypt${test} · ${until}`, detail: s.message ?? `Renouvelé automatiquement 30 jours avant l'échéance.` };
+      const name = s.domain ? `${s.domain} · ` : "";
+      return { tone: s.message ? "wait" : "ok", title: `Let's Encrypt${test} · ${until}`, detail: s.message ?? `${name}renouvelé automatiquement 30 jours avant l'échéance.` };
     }
   }
 }

@@ -83,7 +83,7 @@ export function mockBackend(): Backend {
     { choice: { kind: "mdns" } as const, host: "pwamote-yann-pc.local", label: "pwamote-yann-pc.local", recommended: false },
   ];
   let config: AppConfig = { port: 8443, server_enabled: true, address: { kind: "auto" }, launch_at_login: true, start_minimized: false, close_to_tray: true,
-    public_cert: { enabled: false, domain: "", email: "", provider: { kind: "duck_dns", token: "" }, staging: false } };
+    public_cert: { mode: "auto", domain: "", email: "", provider: { kind: "duck_dns", token: "" }, staging: false } };
   let devices: DeviceView[] = [
     { id: "a", name: "iPhone", paired_at: now() - 86400 * 3, last_seen: now() - 40 },
     { id: "b", name: "iPad", paired_at: now() - 86400 * 9, last_seen: now() - 86400 * 2 },
@@ -94,18 +94,19 @@ export function mockBackend(): Backend {
     const local = config.address.kind === "mdns" ? "pwamote-yann-pc.local" : config.address.kind === "ip" ? config.address.ip : config.address.kind === "custom" ? config.address.host : "192.168.1.20";
     const pc = config.public_cert;
     const token = pc.provider.kind === "duck_dns" ? pc.provider.token : pc.provider.api_token;
-    const ready = pc.enabled && pc.domain.includes(".") && token !== "";
+    const ready = pc.mode === "auto" || (pc.mode === "custom" && pc.domain.includes(".") && token !== "");
+    const name = pc.mode === "auto" ? "k3x9f2ab7qzm.pwamote.app" : pc.domain;
     const now = Math.floor(Date.now() / 1000);
     const public_cert: ServerStatus["public_cert"] = {
-      phase: !pc.enabled ? "disabled" : ready ? "active" : "incomplete",
-      domain: pc.domain || null,
-      message: pc.enabled && !ready ? "Indiquez le nom de domaine et le jeton." : null,
+      phase: pc.mode === "off" ? "disabled" : ready ? "active" : "incomplete",
+      domain: name || null,
+      message: pc.mode !== "off" && !ready ? "Indiquez le nom de domaine et le jeton." : null,
       expires_at: ready ? now + 74 * 86400 : null,
       next_check_at: now + 6 * 3600,
       online: true,
       staging: pc.staging,
     };
-    const host = ready ? pc.domain : local;
+    const host = ready ? name : local;
     const params = new URLSearchParams(location.search);
     const error = params.get("error") === "port" && config.server_enabled ? "Le port 8443 est déjà utilisé par un autre programme. Choisissez-en un autre dans les options." : null;
     const running = config.server_enabled && !error;

@@ -17,6 +17,7 @@ use super::store::{write_atomic, CertStore};
 pub trait Issuer: Send + Sync {
     fn issue<'a>(
         &'a self,
+        domain: &'a str,
         cfg: &'a PublicCertConfig,
         dns: &'a dyn DnsApi,
     ) -> BoxFuture<'a, Result<PemCert, String>>;
@@ -79,9 +80,14 @@ impl LetsEncryptIssuer {
         Ok(account)
     }
 
-    async fn run(&self, cfg: &PublicCertConfig, dns: &dyn DnsApi) -> Result<PemCert, String> {
+    async fn run(
+        &self,
+        domain: &str,
+        cfg: &PublicCertConfig,
+        dns: &dyn DnsApi,
+    ) -> Result<PemCert, String> {
         let account = self.account(cfg).await?;
-        let ids = [Identifier::Dns(cfg.domain.clone())];
+        let ids = [Identifier::Dns(domain.to_string())];
         let mut order = account.new_order(&NewOrder::new(&ids)).await.map_err(err)?;
 
         let mut published = None;
@@ -100,7 +106,7 @@ impl LetsEncryptIssuer {
                 let value = challenge.key_authorization().dns_value();
                 dns.set_txt(&value).await.map_err(err)?;
                 published = Some(value.clone());
-                if !self.wait_for_txt(&cfg.domain, &value).await {
+                if !self.wait_for_txt(domain, &value).await {
                     tracing::warn!("le défi n'est pas encore visible, on tente quand même");
                 }
                 challenge.set_ready().await.map_err(err)?;
@@ -118,7 +124,7 @@ impl LetsEncryptIssuer {
                 ));
             }
             let key = rcgen::KeyPair::generate().map_err(err)?;
-            let csr = rcgen::CertificateParams::new(vec![cfg.domain.clone()])
+            let csr = rcgen::CertificateParams::new(vec![domain.to_string()])
                 .map_err(err)?
                 .serialize_request(&key)
                 .map_err(err)?;
@@ -167,10 +173,11 @@ impl LetsEncryptIssuer {
 impl Issuer for LetsEncryptIssuer {
     fn issue<'a>(
         &'a self,
+        domain: &'a str,
         cfg: &'a PublicCertConfig,
         dns: &'a dyn DnsApi,
     ) -> BoxFuture<'a, Result<PemCert, String>> {
-        Box::pin(self.run(cfg, dns))
+        Box::pin(self.run(domain, cfg, dns))
     }
 }
 

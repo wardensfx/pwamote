@@ -16,12 +16,26 @@ pub enum DnsProvider {
     Cloudflare { api_token: String },
 }
 
+/// D'où vient le nom public du PC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum CertMode {
+    /// Par défaut : un nom `<id>.pwamote.app` attribué par le service PwaMote, sans réglage.
+    #[default]
+    Auto,
+    /// Un domaine à soi (DuckDNS, Cloudflare), réglé à la main.
+    Custom,
+    /// Autorité locale uniquement (profil à installer sur l'iPhone).
+    Off,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(default)]
 #[ts(export)]
 pub struct PublicCertConfig {
-    pub enabled: bool,
-    /// Nom public du PC, par exemple `yann-pc.duckdns.org`.
+    pub mode: CertMode,
+    /// Mode `custom` : nom public du PC, par exemple `yann-pc.duckdns.org`.
     pub domain: String,
     /// Adresse de contact transmise à Let's Encrypt (facultative).
     pub email: String,
@@ -33,7 +47,7 @@ pub struct PublicCertConfig {
 impl Default for PublicCertConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            mode: CertMode::Auto,
             domain: String::new(),
             email: String::new(),
             provider: DnsProvider::DuckDns {
@@ -55,7 +69,7 @@ impl PublicCertConfig {
         self
     }
 
-    /// Ce qui manque pour demander un certificat, en clair ; `None` si tout est prêt.
+    /// Mode `custom` : ce qui manque pour demander un certificat, en clair ; `None` si tout est prêt.
     pub fn missing(&self) -> Option<String> {
         let d = &self.domain;
         if d.is_empty() {
@@ -89,9 +103,9 @@ impl PublicCertConfig {
         None
     }
 
-    /// Activé et complet : la tâche de fond peut travailler.
-    pub fn is_ready(&self) -> bool {
-        self.enabled && self.missing().is_none()
+    /// Domaine réglé à la main et complet.
+    pub fn is_custom_ready(&self) -> bool {
+        self.mode == CertMode::Custom && self.missing().is_none()
     }
 }
 
@@ -130,7 +144,7 @@ mod tests {
 
     fn duck(domain: &str, token: &str) -> PublicCertConfig {
         PublicCertConfig {
-            enabled: true,
+            mode: CertMode::Custom,
             domain: domain.into(),
             provider: DnsProvider::DuckDns {
                 token: token.into(),
@@ -140,10 +154,14 @@ mod tests {
     }
 
     #[test]
-    fn disabled_by_default_and_old_files_still_load() {
-        assert!(!PublicCertConfig::default().is_ready());
-        let c: PublicCertConfig = serde_json::from_str(r#"{"domain":"a.duckdns.org"}"#).unwrap();
-        assert!(!c.enabled && c.domain == "a.duckdns.org");
+    fn automatic_by_default_even_for_older_files() {
+        assert_eq!(PublicCertConfig::default().mode, CertMode::Auto);
+        let c: PublicCertConfig =
+            serde_json::from_str(r#"{"enabled":true,"domain":"a.duckdns.org"}"#).unwrap();
+        assert_eq!(c.mode, CertMode::Auto);
+        assert_eq!(c.domain, "a.duckdns.org");
+        let off: PublicCertConfig = serde_json::from_str(r#"{"mode":"off"}"#).unwrap();
+        assert_eq!(off.mode, CertMode::Off);
     }
 
     #[test]
@@ -166,7 +184,7 @@ mod tests {
 
     #[test]
     fn duckdns_needs_its_suffix_and_a_token() {
-        assert!(duck("yann.duckdns.org", "t").is_ready());
+        assert!(duck("yann.duckdns.org", "t").is_custom_ready());
         assert!(duck("pc.example.fr", "t")
             .missing()
             .unwrap()
@@ -182,14 +200,14 @@ mod tests {
     #[test]
     fn cloudflare_accepts_any_public_domain() {
         let c = PublicCertConfig {
-            enabled: true,
+            mode: CertMode::Custom,
             domain: "pc.example.fr".into(),
             provider: DnsProvider::Cloudflare {
                 api_token: "x".into(),
             },
             ..Default::default()
         };
-        assert!(c.is_ready());
+        assert!(c.is_custom_ready());
     }
 
     #[test]
