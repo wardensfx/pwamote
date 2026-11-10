@@ -2,6 +2,8 @@
 
 Le téléphone comme télécommande du PC, façon Wiimote.
 
+**Site : [pwamote.app](https://pwamote.app)** · [Téléchargements](https://github.com/wardensfx/pwamote/releases/latest)
+
 - **Visée au gyroscope** : on pointe avec le téléphone, le curseur suit. Insensible à la manière de tenir l'appareil.
 - **Trackpad** et **défilement à deux doigts** en complément, au choix dans les réglages.
 - **Clic gauche / clic droit** sur deux grandes zones, avec retour haptique.
