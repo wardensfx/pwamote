@@ -23,7 +23,10 @@ const STALE_AFTER_DAYS = 180;
 const CF_API = "https://api.cloudflare.com/client/v4";
 
 /** Le secret collé dans le tableau de bord peut contenir un espace ou un retour à la ligne. */
-const bearer = (env: Env) => `Bearer ${env.CF_API_TOKEN.trim()}`;
+const bearer = (env: Env) => {
+  if (!env.CF_API_TOKEN) throw new Error("le secret CF_API_TOKEN n'est pas défini sur le Worker");
+  return `Bearer ${env.CF_API_TOKEN.trim()}`;
+};
 
 // ------------------------------------------------------------- règles pures
 

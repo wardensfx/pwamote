@@ -2,6 +2,8 @@
 name = "pwamote-relay"
 main = "src/index.ts"
 compatibility_date = "2025-10-01"
+# Garde le secret CF_API_TOKEN ajouté dans le tableau de bord à chaque déploiement.
+keep_vars = true
 routes = [{ pattern = "dns.pwamote.app", custom_domain = true }]
 
 [vars]
