@@ -6,6 +6,8 @@ routes = [{ pattern = "dns.pwamote.app", custom_domain = true }]
 
 [vars]
 ZONE_NAME = "pwamote.app"
+# ID de la zone (public, pas un secret) : évite d'avoir à chercher la zone avec le jeton.
+ZONE_ID = "560e8b3d21017f4ec6887dbaa2caf9e5"
 
 # Espace de stockage des inscriptions : créé automatiquement au premier déploiement.
 [[kv_namespaces]]

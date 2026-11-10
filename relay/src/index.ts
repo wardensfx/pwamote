@@ -75,8 +75,9 @@ async function zoneId(env: Env): Promise<string> {
   if (env.ZONE_ID) return env.ZONE_ID;
   if (zoneCache?.name === env.ZONE_NAME) return zoneCache.id;
   const rsp = await fetch(`${CF_API}/zones?name=${encodeURIComponent(env.ZONE_NAME)}`, { headers: { authorization: `Bearer ${env.CF_API_TOKEN}` } });
-  const j = (await rsp.json()) as { success: boolean; result: { id: string }[] };
-  if (!j.success || !j.result[0]) throw new Error(`zone ${env.ZONE_NAME} introuvable avec ce jeton`);
+  const j = (await rsp.json()) as { success: boolean; result: { id: string }[]; errors?: { message: string }[] };
+  if (!j.success) throw new Error(`recherche de zone refusée : ${(j.errors ?? []).map((e) => e.message).join(" ; ") || rsp.status}`);
+  if (!j.result[0]) throw new Error(`zone ${env.ZONE_NAME} introuvable avec ce jeton`);
   zoneCache = { name: env.ZONE_NAME, id: j.result[0].id };
   return zoneCache.id;
 }
