@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Appelé par release.yml avec la version du tag : mêmes contrôles, binaires versionnés.
+  workflow_call:
+    inputs:
+      version:
+        description: "Version SemVer à injecter (ex. 1.2.3) ; vide hors release"
+        type: string
+        required: false
+        default: ""
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -11,6 +19,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Vide hors release (null == '' dans les expressions GitHub).
+  PWAMOTE_VERSION: ${{ inputs.version }}
 
 jobs:
   client:
@@ -20,6 +30,11 @@ jobs:
         working-directory: client
     steps:
       - uses: actions/checkout@v4
+      - name: Injecter la version du tag
+        if: inputs.version != ''
+        shell: bash
+        working-directory: .
+        run: node scripts/set-version.mjs "$PWAMOTE_VERSION"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -57,6 +72,11 @@ jobs:
         working-directory: desktop-ui
     steps:
       - uses: actions/checkout@v4
+      - name: Injecter la version du tag
+        if: inputs.version != ''
+        shell: bash
+        working-directory: .
+        run: node scripts/set-version.mjs "$PWAMOTE_VERSION"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -77,6 +97,11 @@ jobs:
     needs: [client, desktop-ui]
     steps:
       - uses: actions/checkout@v4
+      - name: Injecter la version du tag
+        if: inputs.version != ''
+        shell: bash
+        working-directory: .
+        run: node scripts/set-version.mjs "$PWAMOTE_VERSION"
       - uses: actions/download-artifact@v4
         with:
           name: client-dist
@@ -104,6 +129,11 @@ jobs:
     needs: [client, desktop-ui]
     steps:
       - uses: actions/checkout@v4
+      - name: Injecter la version du tag
+        if: inputs.version != ''
+        shell: bash
+        working-directory: .
+        run: node scripts/set-version.mjs "$PWAMOTE_VERSION"
       - uses: actions/download-artifact@v4
         with:
           name: client-dist
@@ -128,6 +158,29 @@ jobs:
         with:
           name: pwamote-installer-windows
           path: target/release/bundle/nsis/*.exe
+
+  # Scripts du dépôt (injection de version pour les releases).
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test scripts/*.test.mjs
+
+  # Aperçu des notes de la prochaine release, dans le résumé du run (onglet Actions).
+  changelog:
+    if: inputs.version == ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx --yes git-cliff@2.14.2 --unreleased >> "$GITHUB_STEP_SUMMARY"
 
   # Les types TypeScript générés par ts-rs doivent toujours refléter le protocole Rust.
   types-in-sync:

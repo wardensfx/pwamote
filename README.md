@@ -64,7 +64,7 @@ Développement guidé par les tests : toute logique vit dans `pwamote-core` (san
 
 ## Workflow
 
-Trunk-based development : branches courtes, intégration fréquente dans `main`, CI verte obligatoire (`fmt`, `clippy -D warnings`, tests Rust sur Windows, tests et build du client, types TypeScript à jour).
+Trunk-based development : commits directs sur `main`, CI verte obligatoire (`fmt`, `clippy -D warnings`, tests Rust sur Windows, tests et build du client, types TypeScript à jour). Messages au format Conventional Commits, d'où est tiré le changelog ; une release se publie en poussant un tag `v1.2.3`. Voir [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## État
 

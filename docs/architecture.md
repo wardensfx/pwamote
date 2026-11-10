@@ -131,6 +131,33 @@ flowchart TD
 
 Les types du protocole sont définis **une seule fois**, en Rust. `cargo test` régénère `client/src/generated`, et la CI échoue si ces fichiers ne sont pas à jour.
 
+## Releases
+
+Le changelog n'est pas un fichier tenu à la main : il est calculé à chaque release à partir des messages de commit entre deux tags (Conventional Commits, voir [CONTRIBUTING.md](../CONTRIBUTING.md)). Le générateur natif de GitHub ne liste que les pull requests ; le dépôt travaillant en commits directs sur `main`, c'est [git-cliff](https://git-cliff.org) qui produit les notes, au format Markdown habituel des releases GitHub.
+
+```mermaid
+flowchart TD
+  C["commit sur main<br/>feat(client): …"] --> CI["ci.yml<br/>tests · build"]
+  CI --> PV["job changelog<br/>aperçu « Non publié » dans le résumé du run"]
+  T["git push origin v1.2.3"] --> R["release.yml"]
+  R --> V["version<br/>tag → 1.2.3 (SemVer validé)"]
+  V --> B["ci.yml appelé avec version=1.2.3"]
+  B --> SV["scripts/set-version.mjs<br/>Cargo.toml · tauri.conf.json · package.json"]
+  SV --> J["mêmes jobs que la CI<br/>fmt · clippy · tests · build"]
+  J --> A1["PwaMote_1.2.3_x64-setup.exe<br/>(NSIS)"]
+  J --> A2["pwamote-server.exe"]
+  A1 --> P["publish"]
+  A2 --> P
+  P --> N["git-cliff --current<br/>notes depuis le tag précédent"]
+  P --> H["SHA256SUMS.txt"]
+  N --> GR["Release GitHub « PwaMote 1.2.3 »<br/>pré-release si v1.2.3-beta.1"]
+  H --> GR
+```
+
+- La version n'est jamais commitée : le dépôt reste à `0.1.0` et chaque job de release l'injecte avant de compiler. Le serveur la publie via `CARGO_PKG_VERSION` (mDNS, User-Agent), la fenêtre via Tauri, la PWA dans Réglages (« Version de l'app : 1.2.3 (date) »).
+- La release ne part que si toute la CI passe, avec les mêmes contrôles que sur `main`.
+- Relancer le workflow d'un tag remplace les notes et les fichiers de la release existante.
+
 ## Appairage
 
 Un code à usage unique (5 min) est encodé dans un QR affiché sur le PC, à l'adresse `https://localhost:8443/admin/pair` (réservée à la machine). Seul l'empreinte SHA-256 du jeton d'appareil est stockée.

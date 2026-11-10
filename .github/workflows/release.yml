@@ -1,0 +1,88 @@
+name: Release
+
+# Pousser un tag de version publie une release :
+#   git tag v1.2.3 && git push origin v1.2.3
+# La CI complète tourne avec la version injectée, puis la release GitHub est créée avec
+# l'installeur, le serveur seul, leurs empreintes SHA-256 et le changelog depuis le tag précédent.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: v
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(node scripts/set-version.mjs --print "$TAG")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # v1.2.3-beta.1 → pré-release
+          if [[ "$version" == *-* ]]; then echo "prerelease=true"; else echo "prerelease=false"; fi >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.version.outputs.version }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: pwamote-installer-windows
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: pwamote-server-windows
+          path: dist
+      - name: Nommer les binaires
+        working-directory: dist
+        run: |
+          mv pwamote-server.exe "pwamote-server_${VERSION}_x64.exe"
+          ls -l
+          sha256sum *.exe > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Changelog depuis le tag précédent
+        run: |
+          # Le titre de la release porte déjà la version : on retire le titre de section.
+          npx --yes git-cliff@2.14.2 --current --strip all | sed '0,/^## /{/^## /d}' > notes.md
+          cat notes.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Publier la release
+        run: |
+          flags=()
+          [[ "$PRERELEASE" == "true" ]] && flags+=(--prerelease) || flags+=(--latest)
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # Relance du workflow : on remplace notes et fichiers.
+            gh release edit "$TAG" --title "PwaMote $VERSION" --notes-file notes.md "${flags[@]}"
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --verify-tag --title "PwaMote $VERSION" --notes-file notes.md "${flags[@]}"
+          fi

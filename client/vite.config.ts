@@ -17,9 +17,15 @@ const inlineTouchIcon = () => ({
     ),
 });
 
+const buildId = () => {
+  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  const version = process.env.PWAMOTE_VERSION?.trim();
+  return version ? `${version} (${stamp})` : stamp;
+};
+
 export default defineConfig({
-  // Horodatage de compilation, affiché dans les réglages pour savoir quelle version tourne.
-  define: { __BUILD_ID__: JSON.stringify(new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC") },
+  // Version (posée par le workflow de release) et horodatage de compilation, affichés dans les réglages.
+  define: { __BUILD_ID__: JSON.stringify(buildId()) },
   plugins: [
     solid(),
     inlineTouchIcon(),
