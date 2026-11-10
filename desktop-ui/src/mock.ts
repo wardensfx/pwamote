@@ -94,13 +94,14 @@ export function mockBackend(): Backend {
     const local = config.address.kind === "mdns" ? "pwamote-yann-pc.local" : config.address.kind === "ip" ? config.address.ip : config.address.kind === "custom" ? config.address.host : "192.168.1.20";
     const pc = config.public_cert;
     const token = pc.provider.kind === "duck_dns" ? pc.provider.token : pc.provider.api_token;
-    const ready = pc.mode === "auto" || (pc.mode === "custom" && pc.domain.includes(".") && token !== "");
+    const setup = new URLSearchParams(location.search).get("setup") === "1";
+    const ready = (pc.mode === "auto" && !setup) || (pc.mode === "custom" && pc.domain.includes(".") && token !== "");
     const name = pc.mode === "auto" ? "k3x9f2ab7qzm.pwamote.app" : pc.domain;
     const now = Math.floor(Date.now() / 1000);
     const public_cert: ServerStatus["public_cert"] = {
-      phase: pc.mode === "off" ? "disabled" : ready ? "active" : "incomplete",
+      phase: pc.mode === "off" ? "disabled" : setup ? "obtaining" : ready ? "active" : "incomplete",
       domain: name || null,
-      message: pc.mode !== "off" && !ready ? "Indiquez le nom de domaine et le jeton." : null,
+      message: setup ? "Demande du certificat à Let's Encrypt : validation DNS, une à deux minutes…" : pc.mode !== "off" && !ready ? "Indiquez le nom de domaine et le jeton." : null,
       expires_at: ready ? now + 74 * 86400 : null,
       next_check_at: now + 6 * 3600,
       online: true,

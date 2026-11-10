@@ -778,6 +778,12 @@ mod tests {
             clock: Arc::new(time::OffsetDateTime::now_utc),
         });
         sup.start().await.unwrap();
+        for _ in 0..100 {
+            if sup.status().await.public_cert.phase == PublicCertPhase::Disabled {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         assert_eq!(
             sup.status().await.public_cert.phase,
             PublicCertPhase::Disabled
@@ -786,7 +792,7 @@ mod tests {
         let mut phase = PublicCertPhase::Disabled;
         for _ in 0..100 {
             phase = sup.status().await.public_cert.phase;
-            if phase != PublicCertPhase::Disabled {
+            if phase == PublicCertPhase::WaitingForNetwork {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;

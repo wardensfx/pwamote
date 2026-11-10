@@ -197,6 +197,17 @@ export function App(props: { backend: Backend }) {
               <h2>Associer un téléphone</h2>
               <div class="qr-wrap">
                 <Show
+                  when={!(s().running && s().public_cert.phase === "obtaining")}
+                  fallback={
+                    <div class="qr off setup" role="status" aria-live="polite">
+                      <span class="spinner" aria-hidden="true" />
+                      <b>Paramétrage du HTTPS…</b>
+                      <span class="setup-step">{s().public_cert.message ?? "Préparation du certificat"}</span>
+                      <span class="setup-hint">Le QR code apparaîtra dès que le certificat sera prêt.</span>
+                    </div>
+                  }
+                >
+                <Show
                   when={pairing()}
                   fallback={
                     <div class="qr off">
@@ -211,8 +222,9 @@ export function App(props: { backend: Backend }) {
                 >
                   {(p) => <div class="qr" innerHTML={p().svg} />}
                 </Show>
+                </Show>
               </div>
-              <Show when={pairing()}>
+              <Show when={pairing() && s().public_cert.phase !== "obtaining"}>
                 <div class="expiry">Code valable encore {countdown(expiresIn())} · à usage unique</div>
               </Show>
 

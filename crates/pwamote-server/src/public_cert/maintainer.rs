@@ -130,7 +130,13 @@ impl Maintainer {
     pub fn new(deps: Deps) -> Self {
         Self {
             deps,
-            status: Default::default(),
+            // Jusqu'au premier passage, on ne sait pas encore quel certificat servira :
+            // la fenêtre attend plutôt que d'afficher un QR code qui changerait aussitôt.
+            status: std::sync::Mutex::new(PublicCertStatus {
+                phase: PublicCertPhase::Obtaining,
+                message: Some("Vérification du certificat…".into()),
+                ..Default::default()
+            }),
             memory: Default::default(),
         }
     }
@@ -141,6 +147,14 @@ impl Maintainer {
 
     fn publish(&self, status: PublicCertStatus) {
         *self.status.lock().unwrap() = status;
+    }
+
+    /// Étape en cours, affichée par la fenêtre pendant le paramétrage.
+    fn progress(&self, base: &PublicCertStatus, message: &str) {
+        let mut st = base.clone();
+        st.phase = PublicCertPhase::Obtaining;
+        st.message = Some(message.to_string());
+        self.publish(st);
     }
 
     /// Un passage complet ; renvoie le délai avant le suivant.
@@ -175,6 +189,11 @@ impl Maintainer {
 
         let online = self.deps.probe.online().await;
         status.online = Some(online);
+        // Premier passage du mode automatique : l'inscription peut prendre quelques secondes.
+        let first_setup = mem.key.is_none() && online;
+        if first_setup && cfg.mode == CertMode::Auto {
+            self.progress(&status, "Préparation : nom pwamote.app de ce PC…");
+        }
         let Target { domain, dns } = match self.deps.targets.resolve(cfg, online).await {
             Resolved::Ready(t) => {
                 mem.reg_failures = 0;
@@ -227,6 +246,9 @@ impl Maintainer {
         if online {
             if let Some(ip) = (self.deps.ips)().first().copied() {
                 if mem.published_ip != Some(ip) {
+                    if resolver.active_domain(now).is_none() {
+                        self.progress(&status, &format!("Publication de l'adresse locale {ip}…"));
+                    }
                     match dns.set_address(ip).await {
                         Ok(()) => {
                             tracing::info!(%ip, %domain, "adresse DNS mise à jour");
@@ -273,9 +295,13 @@ impl Maintainer {
                 d
             }
             Plan::Obtain => {
-                let mut obtaining = status.clone();
-                obtaining.phase = PublicCertPhase::Obtaining;
-                self.publish(obtaining);
+                // Renouvellement d'un certificat encore valide : rien ne change pour l'utilisateur.
+                if !valid {
+                    self.progress(
+                        &status,
+                        "Demande du certificat à Let's Encrypt : validation DNS, une à deux minutes…",
+                    );
+                }
                 tracing::info!(%domain, staging = cfg.staging, "demande de certificat Let's Encrypt");
                 let result = self
                     .deps
@@ -591,6 +617,14 @@ mod tests {
         w.targets.fail.store(false, Ordering::SeqCst);
         w.m.tick(&auto).await;
         assert_eq!(w.m.status().phase, PublicCertPhase::Active);
+    }
+
+    #[tokio::test]
+    async fn waits_for_the_first_check_before_showing_anything() {
+        let w = world(true);
+        assert_eq!(w.m.status().phase, PublicCertPhase::Obtaining);
+        w.m.tick(&off()).await;
+        assert_eq!(w.m.status().phase, PublicCertPhase::Disabled);
     }
 
     #[tokio::test]

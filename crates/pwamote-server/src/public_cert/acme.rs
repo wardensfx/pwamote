@@ -123,12 +123,8 @@ impl LetsEncryptIssuer {
                     "Let's Encrypt n'a pas validé le domaine (commande {status:?}) : le défi DNS n'était pas visible."
                 ));
             }
-            let key = rcgen::KeyPair::generate().map_err(err)?;
-            let csr = rcgen::CertificateParams::new(vec![domain.to_string()])
-                .map_err(err)?
-                .serialize_request(&key)
-                .map_err(err)?;
-            order.finalize_csr(csr.der()).await.map_err(err)?;
+            let (key, csr) = csr_for(domain)?;
+            order.finalize_csr(&csr).await.map_err(err)?;
             let chain_pem = order.poll_certificate(&retry).await.map_err(err)?;
             Ok(PemCert {
                 chain_pem,
@@ -181,6 +177,16 @@ impl Issuer for LetsEncryptIssuer {
     }
 }
 
+/// Clé et demande de signature (CSR) pour `domain`. Le sujet est vide : rcgen y met sinon
+/// « rcgen self signed cert », que Let's Encrypt refuse (seul le nom alternatif compte).
+pub fn csr_for(domain: &str) -> Result<(rcgen::KeyPair, Vec<u8>), String> {
+    let key = rcgen::KeyPair::generate().map_err(err)?;
+    let mut params = rcgen::CertificateParams::new(vec![domain.to_string()]).map_err(err)?;
+    params.distinguished_name = rcgen::DistinguishedName::new();
+    let csr = params.serialize_request(&key).map_err(err)?;
+    Ok((key, csr.der().to_vec()))
+}
+
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -199,6 +205,32 @@ pub fn txt_answer_contains(json: &serde_json::Value, value: &str) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_csr_names_only_the_domain() {
+        use x509_parser::prelude::FromDer;
+        let (_, der) = csr_for("k3x9f2ab7qzm.pwamote.app").unwrap();
+        let (_, csr) =
+            x509_parser::certification_request::X509CertificationRequest::from_der(&der).unwrap();
+        let info = &csr.certification_request_info;
+        assert_eq!(info.subject.iter_attributes().count(), 0, "sujet vide");
+        let sans: Vec<String> = csr
+            .requested_extensions()
+            .into_iter()
+            .flatten()
+            .filter_map(|e| match e {
+                x509_parser::extensions::ParsedExtension::SubjectAlternativeName(san) => Some(
+                    san.general_names
+                        .iter()
+                        .map(|n| n.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                ),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sans, vec!["DNSName(k3x9f2ab7qzm.pwamote.app)"]);
+    }
 
     #[test]
     fn reads_doh_answers() {
