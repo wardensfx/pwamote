@@ -3,8 +3,9 @@ import type { Deck } from "../../client/src/generated/Deck";
 import type { DeviceView } from "../../client/src/generated/DeviceView";
 import type { PairingInfo } from "../../client/src/generated/PairingInfo";
 import type { ServerStatus } from "../../client/src/generated/ServerStatus";
+import type { UpdateInfo } from "../../client/src/generated/UpdateInfo";
 
-export type { AppConfig, Deck, DeviceView, PairingInfo, ServerStatus };
+export type { AppConfig, Deck, DeviceView, PairingInfo, ServerStatus, UpdateInfo };
 
 export interface Backend {
   getStatus(): Promise<ServerStatus>;
@@ -21,6 +22,11 @@ export interface Backend {
   hasBackdrop(): Promise<boolean>;
   dataDir(): Promise<string>;
   onStatusChanged(cb: (s: ServerStatus) => void): Promise<() => void>;
+  /** Version de l'application et mise à jour trouvée (binaires de la CI seulement). */
+  getUpdateInfo(): Promise<UpdateInfo>;
+  /** Ouvre la page de la nouvelle version dans le navigateur. */
+  openRelease(): Promise<void>;
+  onUpdateChanged(cb: (u: UpdateInfo) => void): Promise<() => void>;
 }
 
 const inTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -41,6 +47,9 @@ async function tauriBackend(): Promise<Backend> {
     hasBackdrop: () => invoke("has_backdrop"),
     dataDir: () => invoke("data_dir_path"),
     onStatusChanged: (cb) => listen<ServerStatus>("status-changed", (e) => cb(e.payload)),
+    getUpdateInfo: () => invoke("get_update_info"),
+    openRelease: () => invoke("open_release"),
+    onUpdateChanged: (cb) => listen<UpdateInfo>("update-changed", (e) => cb(e.payload)),
   };
 }
 

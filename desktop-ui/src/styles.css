@@ -57,6 +57,25 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand svg { width: 34px; height: 34px; color: var(--ink); }
 .machine { color: var(--ink-faint); font-size: 12.5px; margin-top: 2px; }
+.title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.version { color: var(--ink-faint); font-size: 11.5px; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; transform: translateY(2px); cursor: default; }
+
+/* Pastille « Mise à jour » : verre teinté d'ambre, point lumineux qui respire doucement. */
+.update-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 10px 0 8px; border-radius: 11px;
+  border: 1px solid rgba(240, 194, 122, 0.32); border-top-color: rgba(240, 194, 122, 0.5);
+  background: linear-gradient(180deg, rgba(240, 194, 122, 0.18), rgba(240, 194, 122, 0.08));
+  color: var(--accent); font: inherit; font-size: 11.5px; font-weight: 650; cursor: pointer; transform: translateY(1px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 6px 16px -8px rgba(240, 194, 122, 0.5);
+  animation: chip-in 0.5s var(--spring) both; transition: filter 0.2s, transform 0.25s var(--spring);
+}
+.update-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: chip-pulse 2.4s ease-in-out infinite; }
+.update-chip:hover { filter: brightness(1.12); }
+.update-chip:active { transform: translateY(1px) scale(0.95); }
+.update-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@keyframes chip-in { from { opacity: 0; transform: translateY(1px) scale(0.85); } }
+@keyframes chip-pulse { 50% { opacity: 0.45; box-shadow: 0 0 2px var(--accent); } }
+@media (prefers-reduced-motion: reduce) { .update-chip, .update-chip i { animation: none; } }
 .power { display: flex; align-items: center; gap: 12px; }
 .power-label { color: var(--ink-dim); font-size: 13px; }
 

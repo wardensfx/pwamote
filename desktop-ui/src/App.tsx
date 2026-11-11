@@ -2,7 +2,8 @@ import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMou
 import { DeckEditor } from "./DeckEditor";
 import { PublicCertCard } from "./PublicCert";
 import { countdown, isValidHost, phonesLabel, relativeTime, selectedAddress } from "./format";
-import type { AppConfig, Backend, DeviceView, PairingInfo, ServerStatus } from "./ipc";
+import type { AppConfig, Backend, DeviceView, PairingInfo, ServerStatus, UpdateInfo } from "./ipc";
+import { updateLabel, versionHint, versionText } from "./version";
 
 /** Durée de validité d'un code d'appairage, en secondes (voir pwamote-core). */
 const CODE_TTL = 300;
@@ -45,6 +46,7 @@ export function App(props: { backend: Backend }) {
   const [portDraft, setPortDraft] = createSignal<string | null>(null);
   const [tab, setTab] = createSignal<"connection" | "actions">("connection");
   const [deckDirty, setDeckDirty] = createSignal(false);
+  const [update, setUpdate] = createSignal<UpdateInfo | null>(null);
   // Ne remplace l'état que s'il a vraiment changé : sinon la liste d'adresses et le QR se redessinent
   // à chaque interrogation périodique.
   const updateStatus = (next: ServerStatus) => {
@@ -78,6 +80,9 @@ export function App(props: { backend: Backend }) {
       setCustomMode(true);
     }
     setDevices(await be.listDevices());
+    setUpdate(await be.getUpdateInfo());
+    const unlistenUpdate = await be.onUpdateChanged(setUpdate);
+    onCleanup(unlistenUpdate);
     const unlisten = await be.onStatusChanged(updateStatus);
     const poll = setInterval(async () => {
       updateStatus(await be.getStatus());
@@ -143,7 +148,26 @@ export function App(props: { backend: Backend }) {
                   <circle cx="256" cy="196" r="38" fill="var(--accent)" />
                 </svg>
                 <div>
-                  <h1>PwaMote</h1>
+                  <div class="title-row">
+                    <h1>PwaMote</h1>
+                    <Show when={update()}>
+                      {(u) => (
+                        <>
+                          <span class="version" title={versionHint(u())}>
+                            {versionText(u())}
+                          </span>
+                          <Show when={updateLabel(u())}>
+                            {(label) => (
+                              <button class="update-chip" title={versionHint(u())} onClick={() => void be.openRelease()}>
+                                <i aria-hidden="true" />
+                                {label()}
+                              </button>
+                            )}
+                          </Show>
+                        </>
+                      )}
+                    </Show>
+                  </div>
                   <div class="machine">{s().machine}</div>
                 </div>
               </div>

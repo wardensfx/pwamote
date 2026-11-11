@@ -158,6 +158,30 @@ flowchart TD
 - La release ne part que si toute la CI passe, avec les mêmes contrôles que sur `main`.
 - Relancer le workflow d'un tag remplace les notes et les fichiers de la release existante.
 
+### Mises à jour dans l'application de bureau
+
+La fenêtre affiche sa version en petit à côté du titre et, s'il en existe une plus récente, une pastille « Mise à jour 1.3.0 » qui ouvre la page de la release. Le menu de la barre système montre la même information sur sa première ligne.
+
+Seuls les binaires publiés par la CI de release vérifient les mises à jour. Le workflow définit `PWAMOTE_RELEASE_REPO` (le dépôt qui publie, `wardensfx/pwamote`) au moment de compiler ; le binaire le lit avec `option_env!`. Sans cette variable, c'est-à-dire pour quiconque compile le code lui-même ou pour la CI ordinaire de `main`, rien n'est vérifié et GitHub n'est jamais contacté : la fenêtre affiche alors `v0.1.0 · dev`.
+
+```mermaid
+sequenceDiagram
+  participant D as Application (binaire de release)
+  participant G as api.github.com
+  participant UI as Fenêtre
+  Note over D: 15 s après le lancement, puis toutes les 6 h
+  D->>G: GET /repos/wardensfx/pwamote/releases/latest
+  G-->>D: tag_name v1.3.0, html_url
+  D->>D: semver 1.3.0 > version courante ? (brouillons et pré-releases ignorés)
+  D-->>UI: événement update-changed
+  UI->>D: clic sur la pastille : open_release
+  D->>D: ouvre html_url (jamais une adresse venue de l'interface)
+```
+
+- Hors ligne ou limite de l'API atteinte (60 requêtes par heure et par IP sans authentification) : l'échec est ignoré et la vérification suivante a lieu six heures plus tard.
+- Une installation en `1.3.0-beta.2` se voit proposer `1.3.0` dès sa sortie ; les pré-releases elles-mêmes ne sont jamais proposées.
+- Il n'y a pas d'installation automatique : la pastille mène à la page de la release, avec les notes et l'installeur.
+
 ## Appairage
 
 Un code à usage unique (5 min) est encodé dans un QR affiché sur le PC, à l'adresse `https://localhost:8443/admin/pair` (réservée à la machine). Seul l'empreinte SHA-256 du jeton d'appareil est stockée.

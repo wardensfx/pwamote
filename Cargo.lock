@@ -3435,6 +3435,7 @@ dependencies = [
  "reqwest",
  "rust-embed",
  "rustls",
+ "semver",
  "serde",
  "serde_json",
  "tempfile",

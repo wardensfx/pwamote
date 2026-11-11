@@ -3,14 +3,15 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use pwamote_server::bootstrap;
 use pwamote_server::config::AppConfig;
 use pwamote_server::pwamote_core::actions::Deck;
 use pwamote_server::supervisor::{DeviceView, PairingInfo, ServerStatus, Supervisor};
+use pwamote_server::update::{self, UpdateInfo};
 use tauri::menu::{
-    CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem,
+    CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItem, MenuItemBuilder, PredefinedMenuItem,
 };
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent, Wry};
@@ -20,6 +21,9 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 /// (par exemple depuis le menu de la barre système).
 const STATUS_EVENT: &str = "status-changed";
 
+/// Événement envoyé quand une nouvelle version vient d'être trouvée.
+const UPDATE_EVENT: &str = "update-changed";
+
 struct Ctx {
     supervisor: Arc<Supervisor>,
     data_dir: PathBuf,
@@ -28,6 +32,10 @@ struct Ctx {
     /// Vrai si Windows a appliqué l'effet Mica (sinon l'interface reste opaque).
     backdrop: AtomicBool,
     tray_toggle: CheckMenuItem<Wry>,
+    /// Version affichée et dernière mise à jour connue.
+    update: Mutex<UpdateInfo>,
+    /// Ligne du menu : la version, ou la mise à jour disponible.
+    tray_version: MenuItem<Wry>,
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -135,6 +143,90 @@ fn data_dir_path(ctx: State<'_, Ctx>) -> String {
     ctx.data_dir.display().to_string()
 }
 
+#[tauri::command]
+fn get_update_info(ctx: State<'_, Ctx>) -> UpdateInfo {
+    ctx.update.lock().unwrap().clone()
+}
+
+/// Ouvre la page de la release trouvée. Seule l'adresse renvoyée par GitHub est ouverte,
+/// jamais une adresse fournie par l'interface.
+#[tauri::command]
+fn open_release(ctx: State<'_, Ctx>) -> Result<(), String> {
+    open_release_page(&ctx)
+}
+
+fn open_release_page(ctx: &Ctx) -> Result<(), String> {
+    let url = ctx
+        .update
+        .lock()
+        .unwrap()
+        .available
+        .as_ref()
+        .map(|r| r.url.clone());
+    let Some(url) = url else {
+        return Err("aucune mise à jour disponible".into());
+    };
+    #[cfg(windows)]
+    return pwamote_server::platform::windows::shell_open(&url);
+    #[cfg(not(windows))]
+    {
+        tracing::info!(url, "page de la release");
+        Ok(())
+    }
+}
+
+/// Vérifie les mises à jour au lancement puis régulièrement. Uniquement pour les binaires
+/// de la CI : une compilation locale ne contacte jamais GitHub.
+fn watch_updates(app: AppHandle) {
+    let Some(repo) = update::release_repo() else {
+        tracing::info!("compilation locale : pas de vérification des mises à jour");
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let http = pwamote_server::public_cert::dns::http_client();
+        // Laisse le serveur démarrer avant d'aller sur le réseau.
+        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+        loop {
+            match update::check(&http, update::GITHUB_API, repo, update::CURRENT_VERSION).await {
+                Ok(found) => {
+                    let ctx = app.state::<Ctx>();
+                    let info = UpdateInfo::new(found);
+                    let changed = {
+                        let mut cur = ctx.update.lock().unwrap();
+                        let changed = *cur != info;
+                        *cur = info.clone();
+                        changed
+                    };
+                    if changed {
+                        if let Some(r) = &info.available {
+                            tracing::info!(version = %r.version, "mise à jour disponible");
+                        }
+                        sync_tray_update(&ctx, &info);
+                        let _ = app.emit(UPDATE_EVENT, info);
+                    }
+                }
+                // Hors ligne ou limite de l'API atteinte : on retentera plus tard.
+                Err(e) => tracing::debug!(error = %e, "vérification des mises à jour"),
+            }
+            tokio::time::sleep(update::CHECK_INTERVAL).await;
+        }
+    });
+}
+
+/// Ajoute « Mise à jour disponible » au menu de la barre système.
+fn sync_tray_update(ctx: &Ctx, info: &UpdateInfo) {
+    let item = &ctx.tray_version;
+    let _ = item.set_text(tray_version_label(info));
+    let _ = item.set_enabled(info.available.is_some());
+}
+
+fn tray_version_label(info: &UpdateInfo) -> String {
+    match &info.available {
+        Some(r) => format!("Mise à jour {} disponible…", r.version),
+        None => format!("PwaMote {}", info.current),
+    }
+}
+
 /// Quitte proprement : le serveur est arrêté avant la fin du processus.
 fn quit(app: &AppHandle) {
     if let Some(ctx) = app.try_state::<Ctx>() {
@@ -183,7 +275,9 @@ fn main() {
             set_deck,
             test_action,
             has_backdrop,
-            data_dir_path
+            data_dir_path,
+            get_update_info,
+            open_release
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -194,7 +288,13 @@ fn main() {
                 .checked(config.server_enabled)
                 .build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quitter PwaMote").build(app)?;
+            let update_info = UpdateInfo::new(None);
+            let version = MenuItemBuilder::with_id("version", tray_version_label(&update_info))
+                .enabled(false)
+                .build(app)?;
             let menu = MenuBuilder::new(app)
+                .item(&version)
+                .item(&PredefinedMenuItem::separator(app)?)
                 .item(&open)
                 .item(&toggle)
                 .item(&PredefinedMenuItem::separator(app)?)
@@ -208,6 +308,11 @@ fn main() {
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => show_main_window(app),
                     "quit" => quit(app),
+                    "version" => {
+                        if let Err(e) = open_release_page(&app.state::<Ctx>()) {
+                            tracing::warn!(error = %e, "page de la release");
+                        }
+                    }
                     "toggle" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
@@ -248,7 +353,10 @@ fn main() {
                 close_to_tray: AtomicBool::new(config.close_to_tray),
                 backdrop: AtomicBool::new(backdrop),
                 tray_toggle: toggle,
+                update: Mutex::new(update_info),
+                tray_version: version,
             });
+            watch_updates(handle.clone());
 
             // Le lancement au démarrage de Windows suit toujours la configuration enregistrée.
             if config.launch_at_login != handle.autolaunch().is_enabled().unwrap_or(false) {

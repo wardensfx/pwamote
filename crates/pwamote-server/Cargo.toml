@@ -23,6 +23,7 @@ rand = "0.10.3"
 rcgen = { version = "0.14.10", features = ["pem"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "query"] }
 rust-embed = "8.13.0"
+semver = "1.0.28"
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

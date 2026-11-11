@@ -12,6 +12,7 @@ pub mod session;
 pub mod state;
 pub mod supervisor;
 pub mod tls;
+pub mod update;
 pub mod web;
 
 /// Le cœur, pour l’application de bureau (types du panneau d’actions).

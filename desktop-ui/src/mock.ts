@@ -139,5 +139,14 @@ export function mockBackend(): Backend {
     hasBackdrop: async () => false,
     dataDir: async () => "C:\\Users\\Yann\\AppData\\Roaming\\PwaMote",
     onStatusChanged: async (cb) => (subs.add(cb), () => void subs.delete(cb)),
+    // ?update=1 simule une nouvelle version, ?dev=1 une compilation locale.
+    getUpdateInfo: async () => {
+      const params = new URLSearchParams(location.search);
+      const official = params.get("dev") !== "1";
+      const available = official && params.get("update") === "1" ? { version: "1.3.0", url: "https://github.com/wardensfx/pwamote/releases/tag/v1.3.0" } : null;
+      return { current: official ? "1.2.0" : "0.1.0", official, available };
+    },
+    openRelease: async () => void window.open("https://github.com/wardensfx/pwamote/releases/tag/v1.3.0", "_blank"),
+    onUpdateChanged: async () => () => {},
   };
 }

@@ -6,6 +6,8 @@ use std::{fs, path::Path};
 fn main() {
     let dist = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../client/dist");
     println!("cargo:rerun-if-changed={}", dist.display());
+    // Dépôt des releases, défini seulement par la CI (voir src/update.rs).
+    println!("cargo:rerun-if-env-changed=PWAMOTE_RELEASE_REPO");
     if !dist.join("index.html").exists() {
         fs::create_dir_all(&dist).expect("création de client/dist");
         fs::write(

@@ -21,6 +21,9 @@ env:
   CARGO_TERM_COLOR: always
   # Vide hors release (null == '' dans les expressions GitHub).
   PWAMOTE_VERSION: ${{ inputs.version }}
+  # Seuls les binaires de release vérifient les mises à jour (voir crates/pwamote-server/src/update.rs) :
+  # une compilation locale ou une CI ordinaire ne contacte jamais GitHub.
+  PWAMOTE_RELEASE_REPO: ${{ inputs.version != '' && github.repository || '' }}
 
 jobs:
   client:
