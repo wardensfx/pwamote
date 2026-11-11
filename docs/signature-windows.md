@@ -1,6 +1,6 @@
 # Signature Windows (Authenticode)
 
-Sans signature, Windows SmartScreen affiche « Windows a protégé votre ordinateur » et **Éditeur : inconnu** au premier lancement de l'installeur ou du serveur téléchargés depuis GitHub. Une signature Authenticode remplace « inconnu » par le nom vérifié de l'éditeur, et sert de base à la réputation SmartScreen.
+Sans signature, Windows SmartScreen affiche « Windows a protégé votre ordinateur » et **Éditeur : inconnu** au premier lancement de l'installeur ou de la version sans installation téléchargés depuis GitHub. Une signature Authenticode remplace « inconnu » par le nom vérifié de l'éditeur, et sert de base à la réputation SmartScreen.
 
 La CI de release sait signer avec **Azure Artifact Signing** (ex-Trusted Signing). Elle reste inactive tant que les variables ci-dessous ne sont pas renseignées : les releases sortent alors non signées, comme avant.
 
@@ -20,8 +20,8 @@ flowchart TD
     verify --> pub["publish : release GitHub"]
 ```
 
-- **Serveur seul** : signé par l'action officielle Microsoft juste après `cargo build --release`.
-- **Application de bureau** : Tauri retouche le binaire pendant le bundling, une signature posée avant serait invalidée. On lui passe donc un `signCommand` (`artifact-signing-cli`, l'outil recommandé par la documentation Tauri) qu'il appelle lui-même pour l'exécutable, l'installeur et le désinstalleur.
+- **Serveur seul** (`pwamote-server.exe`, artefact de CI, n'est plus publié en release) : signé par l'action officielle Microsoft juste après `cargo build --release`.
+- **Application de bureau** : Tauri retouche le binaire pendant le bundling, une signature posée avant serait invalidée. On lui passe donc un `signCommand` (`artifact-signing-cli`, l'outil recommandé par la documentation Tauri) qu'il appelle lui-même pour l'exécutable, l'installeur et le désinstalleur. Ce même exécutable signé est publié tel quel comme version sans installation (`PwaMote_1.2.3_x64_portable.exe`).
 - Horodatage RFC 3161 (`timestamp.acs.microsoft.com`) : les certificats Artifact Signing ne vivent que 3 jours, l'horodatage garde la signature valide ensuite.
 - Le job échoue si une signature attendue est absente, invalide ou non horodatée.
 
@@ -57,6 +57,6 @@ L'installation via le Microsoft Store (paquet MSIX re-signé par Microsoft) est 
 ## Vérifier localement
 
 ```powershell
-./scripts/verify-signature.ps1 .\pwamote-server_1.2.3_x64.exe
+./scripts/verify-signature.ps1 .\PwaMote_1.2.3_x64_portable.exe
 # ou : clic droit › Propriétés › Signatures numériques
 ```

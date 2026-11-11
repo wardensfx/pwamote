@@ -74,7 +74,23 @@ flowchart LR
     SUP --> ST
   end
   CMD --> SUP
-  CLI["pwamote-server (CLI)"] --> SUP
+  CLI["pwamote-server (CLI)"] --> HL["headless::run"]
+  CON["PwaMote.exe --console"] --> HL
+  HL --> SUP
+```
+
+### Lancement de l'exécutable de bureau
+
+En release, `PwaMote.exe` est compilé pour le sous-système « windows » : rien ne s'ouvre derrière la fenêtre. Les arguments sont lus par `pwamote_server::cli` (testé sans Windows) ; la console n'est demandée qu'au besoin, par `platform::windows_console`.
+
+```mermaid
+flowchart TD
+  L["PwaMote.exe [option]"] --> P{"cli::parse"}
+  P -->|aucune| G["Application<br/>fenêtre · barre système"]
+  G --> F["journal : %APPDATA%\PwaMote\logs\pwamote.log"]
+  P -->|"--console / -c"| A["AttachConsole(parent)<br/>sinon AllocConsole"]
+  A --> H["headless::run<br/>serveur seul jusqu'à Ctrl+C"]
+  P -->|"--help · --version<br/>argument inconnu"| A2["console rattachée<br/>texte, puis sortie"]
 ```
 
 ### Cycle de vie de la fenêtre
@@ -145,7 +161,7 @@ flowchart TD
   B --> SV["scripts/set-version.mjs<br/>Cargo.toml · tauri.conf.json · package.json"]
   SV --> J["mêmes jobs que la CI<br/>fmt · clippy · tests · build"]
   J --> A1["PwaMote_1.2.3_x64-setup.exe<br/>(NSIS)"]
-  J --> A2["pwamote-server.exe"]
+  J --> A2["PwaMote_1.2.3_x64_portable.exe<br/>(sans installation)"]
   A1 --> P["publish"]
   A2 --> P
   P --> N["git-cliff --current<br/>notes depuis le tag précédent"]

@@ -5,11 +5,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use pwamote_server::bootstrap;
+use pwamote_server::cli::{self, Launch};
 use pwamote_server::config::AppConfig;
 use pwamote_server::pwamote_core::actions::Deck;
 use pwamote_server::supervisor::{DeviceView, PairingInfo, ServerStatus, Supervisor};
 use pwamote_server::update::{self, UpdateInfo};
+use pwamote_server::{bootstrap, headless, logging};
 use tauri::menu::{
     CheckMenuItem, CheckMenuItemBuilder, MenuBuilder, MenuItem, MenuItemBuilder, PredefinedMenuItem,
 };
@@ -236,12 +237,85 @@ fn quit(app: &AppHandle) {
     app.exit(0);
 }
 
+fn env_filter() -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())
+}
+
+/// Console pour la sortie texte : celle du terminal, ou une fenêtre neuve. Sans effet hors
+/// Windows et en debug (l'exécutable y a déjà une console). Renvoie vrai pour une fenêtre neuve.
+fn attach_console() -> bool {
+    #[cfg(all(windows, not(debug_assertions)))]
+    {
+        use pwamote_server::platform::windows_console::{self, Console};
+        let console = windows_console::attach();
+        if console == Console::Parent {
+            // Le terminal a déjà réaffiché son invite : on repart à la ligne.
+            println!();
+        }
+        console == Console::New
+    }
+    #[cfg(not(all(windows, not(debug_assertions))))]
+    false
+}
+
+/// Laisse lire une fenêtre de console ouverte pour l'occasion avant qu'elle ne se ferme.
+fn pause_if_new(new_console: bool) {
+    if new_console {
+        println!("Appuyez sur Entrée pour fermer.");
+        let _ = std::io::stdin().read_line(&mut String::new());
+    }
+}
+
 fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    let version = env!("CARGO_PKG_VERSION");
+    match cli::parse(std::env::args().skip(1)) {
+        Ok(Launch::Gui) => run_app(),
+        Ok(Launch::Console) => {
+            attach_console();
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter())
+                // Une console rattachée n'interprète pas toujours les couleurs ANSI.
+                .with_ansi(false)
+                .init();
+            let result = tokio::runtime::Runtime::new()
+                .map_err(Into::into)
+                .and_then(|rt| rt.block_on(headless::run()));
+            if let Err(e) = result {
+                eprintln!("PwaMote : {e}");
+                std::process::exit(1);
+            }
+        }
+        Ok(Launch::Help) => {
+            let new = attach_console();
+            print!("{}", cli::help(version));
+            pause_if_new(new);
+        }
+        Ok(Launch::Version) => {
+            let new = attach_console();
+            println!("PwaMote {version}");
+            pause_if_new(new);
+        }
+        Err(e) => {
+            let new = attach_console();
+            eprintln!("{e}\n");
+            eprint!("{}", cli::help(version));
+            pause_if_new(new);
+            std::process::exit(2);
+        }
+    }
+}
+
+/// L'application : fenêtre, barre système, journal dans un fichier (aucune console).
+fn run_app() {
+    let log = logging::open_log(&bootstrap::data_dir());
+    let subscriber = tracing_subscriber::fmt().with_env_filter(env_filter());
+    match log {
+        Ok(file) => subscriber
+            .with_ansi(false)
+            .with_writer(Mutex::new(file))
+            .init(),
+        Err(_) => subscriber.init(),
+    }
 
     let opened = match bootstrap::open(bootstrap::data_dir()) {
         Ok(o) => o,

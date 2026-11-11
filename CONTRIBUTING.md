@@ -28,6 +28,6 @@ git tag v1.2.3          # SemVer ; v1.2.3-beta.1 publie une pré-release
 git push origin v1.2.3
 ```
 
-Le workflow [`release.yml`](.github/workflows/release.yml) relance toute la CI avec cette version injectée (Cargo, Tauri, PWA), puis crée la release GitHub avec l'installeur `PwaMote_1.2.3_x64-setup.exe`, le serveur seul `pwamote-server_1.2.3_x64.exe`, `SHA256SUMS.txt` et les notes générées depuis le tag précédent. Les numéros de version restent à `0.1.0` dans le dépôt : seul le tag fait foi. Détails dans [l'architecture](docs/architecture.md#releases). Seuls ces binaires signalent les nouvelles versions dans la fenêtre ; une compilation locale ne contacte jamais GitHub.
+Le workflow [`release.yml`](.github/workflows/release.yml) relance toute la CI avec cette version injectée (Cargo, Tauri, PWA), puis crée la release GitHub avec l'installeur `PwaMote_1.2.3_x64-setup.exe`, la version sans installation `PwaMote_1.2.3_x64_portable.exe`, `SHA256SUMS.txt` et les notes générées depuis le tag précédent. Les numéros de version restent à `0.1.0` dans le dépôt : seul le tag fait foi. Détails dans [l'architecture](docs/architecture.md#releases). Seuls ces binaires signalent les nouvelles versions dans la fenêtre ; une compilation locale ne contacte jamais GitHub.
 
 Les exécutables sont signés (Authenticode, Azure Artifact Signing) dès que les variables et secrets décrits dans [la signature Windows](docs/signature-windows.md) sont configurés ; sinon ils sortent non signés.

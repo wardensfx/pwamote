@@ -1,9 +1,12 @@
 pub mod actions;
 pub mod bootstrap;
+pub mod cli;
 pub mod clipboard;
 pub mod config;
 pub mod firewall;
+pub mod headless;
 pub mod input;
+pub mod logging;
 pub mod mdns;
 pub mod net;
 pub mod platform;

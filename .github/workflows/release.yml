@@ -63,12 +63,13 @@ jobs:
           path: dist
       - uses: actions/download-artifact@v4
         with:
-          name: pwamote-server-windows
+          name: pwamote-portable-windows
           path: dist
       - name: Nommer les binaires
         working-directory: dist
         run: |
-          mv pwamote-server.exe "pwamote-server_${VERSION}_x64.exe"
+          # L'application sans installation : s'ouvre sans console, `--console` pour le serveur seul.
+          mv pwamote-desktop.exe "PwaMote_${VERSION}_x64_portable.exe"
           ls -l
           sha256sum *.exe > SHA256SUMS.txt
           cat SHA256SUMS.txt

@@ -30,7 +30,18 @@ L'application s'ouvre avec le **QR code** et l'état du serveur. L'onglet **Acti
 
 L'installeur Windows (`.exe`, installation par utilisateur) est produit par la CI : artefact `pwamote-installer-windows`.
 
-Mode ligne de commande, sans fenêtre : `cargo run --release -p pwamote-server`, puis `https://localhost:8443/admin/pair` pour le QR code.
+Chaque release propose aussi `PwaMote_<version>_x64_portable.exe` : la même application, sans installation. Elle ne s'extrait nulle part et tourne depuis l'endroit où on la pose ; ses données (réglages, appareils, certificats) vont dans `%APPDATA%\PwaMote`, comme la version installée, avec qui elle les partage. Elle ne crée ni raccourci ni entrée de désinstallation ; « Lancer avec Windows » pointe vers l'emplacement actuel du fichier.
+
+Aucune console ne s'ouvre : le journal est écrit dans `%APPDATA%\PwaMote\logs\pwamote.log` (mis de côté en `pwamote.old.log` au-delà de 2 Mo). En ligne de commande :
+
+```powershell
+.\PwaMote.exe --console    # serveur seul, journal dans la console, Ctrl+C pour arrêter
+.\PwaMote.exe --help       # options ; --version pour la version
+```
+
+Le programme étant une application fenêtrée, PowerShell et cmd rendent la main tout de suite et la sortie s'affiche par-dessus l'invite. Pour qu'ils attendent : `.\PwaMote.exe --console | Out-Host` (PowerShell) ou `start /wait PwaMote.exe --console` (cmd). Lancé par un raccourci, `--console` ouvre sa propre fenêtre.
+
+Pour le développement, le serveur seul existe aussi en binaire console : `cargo run --release -p pwamote-server`, puis `https://localhost:8443/admin/pair` pour le QR code.
 
 ### Sans internet ou en mode local : faire confiance au PC
 
