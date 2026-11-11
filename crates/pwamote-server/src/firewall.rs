@@ -4,6 +4,10 @@
 //! qu'on n'a pas accepté sa fenêtre d'autorisation (ou crée une règle de blocage si on l'a fermée).
 //! Le PC paraît « en ligne », mais le téléphone ne le joint plus. Un clic dans la fenêtre remplace
 //! toutes les règles de cet exécutable par une seule règle d'entrée, limitée au réseau local.
+//!
+//! La règle couvre TCP (HTTPS) **et** UDP (annonce mDNS) : avec TCP seul, l'écoute mDNS faisait
+//! apparaître la fenêtre de Windows, qui créait une règle de blocage, que le lancement suivant
+//! retirait avec une nouvelle demande d'administrateur… à chaque lancement.
 
 use base64::Engine as _;
 
@@ -16,7 +20,8 @@ fn ps_quote(s: &str) -> String {
 }
 
 /// Script qui retire les règles existantes de cet exécutable (y compris un blocage créé quand la
-/// fenêtre de Windows a été fermée) et en crée une qui n'accepte que le sous-réseau local, en TCP.
+/// fenêtre de Windows a été fermée) et en crée une qui n'accepte que le sous-réseau local
+/// (tous protocoles : HTTPS en TCP, mDNS en UDP).
 pub fn firewall_script(exe: &str) -> String {
     let exe = ps_quote(exe);
     let name = ps_quote(RULE_NAME);
@@ -24,7 +29,7 @@ pub fn firewall_script(exe: &str) -> String {
         "$ErrorActionPreference = 'Stop'; \
          Get-NetFirewallApplicationFilter -Program {exe} -ErrorAction SilentlyContinue | Get-NetFirewallRule -ErrorAction SilentlyContinue | Remove-NetFirewallRule; \
          Get-NetFirewallRule -DisplayName {name} -ErrorAction SilentlyContinue | Remove-NetFirewallRule; \
-         New-NetFirewallRule -DisplayName {name} -Direction Inbound -Action Allow -Program {exe} -Protocol TCP -RemoteAddress LocalSubnet -Profile Any | Out-Null"
+         New-NetFirewallRule -DisplayName {name} -Direction Inbound -Action Allow -Program {exe} -Protocol Any -RemoteAddress LocalSubnet -Profile Any | Out-Null"
     )
 }
 
@@ -48,21 +53,70 @@ pub enum RuleState {
     Unknown,
 }
 
-/// Script de lecture seule (sans élévation) : `allowed`, `blocked` ou `missing`.
+/// Script de lecture seule (sans élévation) : les règles de cet exécutable et celle de PwaMote,
+/// en JSON. La décision se prend côté Rust (`decide`), où elle est testée.
 pub fn check_script(exe: &str) -> String {
     let exe = ps_quote(exe);
+    let name = ps_quote(RULE_NAME);
     format!(
-        "$r = Get-NetFirewallApplicationFilter -Program {exe} -ErrorAction SilentlyContinue | Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object {{ $_.Direction -eq 'Inbound' -and $_.Enabled -eq 'True' }}; \
-         if ($r | Where-Object Action -eq 'Block') {{ 'blocked' }} elseif ($r | Where-Object Action -eq 'Allow') {{ 'allowed' }} else {{ 'missing' }}"
+        "$ErrorActionPreference = 'SilentlyContinue'; [Console]::OutputEncoding = [Text.Encoding]::UTF8; \
+         $rules = @(Get-NetFirewallApplicationFilter -Program {exe} | Get-NetFirewallRule) + @(Get-NetFirewallRule -DisplayName {name}); \
+         $items = @($rules | Where-Object {{ $_ }} | ForEach-Object {{ \
+           [pscustomobject]@{{ action = \"$($_.Action)\"; enabled = \"$($_.Enabled)\"; direction = \"$($_.Direction)\"; \
+             program = \"$(($_ | Get-NetFirewallApplicationFilter).Program)\"; protocol = \"$(($_ | Get-NetFirewallPortFilter).Protocol)\" }} }}); \
+         ConvertTo-Json -InputObject $items -Compress"
     )
 }
 
-pub fn parse_state(output: &str) -> RuleState {
-    match output.trim().lines().last().map(str::trim) {
-        Some("allowed") => RuleState::Allowed,
-        Some("blocked") => RuleState::Blocked,
-        Some("missing") => RuleState::Missing,
-        _ => RuleState::Unknown,
+/// Une règle telle que lue par `check_script`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct RuleInfo {
+    pub action: String,
+    pub enabled: String,
+    pub direction: String,
+    pub program: String,
+    pub protocol: String,
+}
+
+/// Les téléphones passent-ils ? Seules comptent les règles d'entrée actives de cet exécutable
+/// (la casse du chemin n'a pas d'importance sous Windows). Il faut TCP (HTTPS) et UDP (mDNS) :
+/// sans UDP, Windows afficherait sa propre fenêtre au démarrage de l'annonce mDNS.
+pub fn decide(rules: &[RuleInfo], exe: &str) -> RuleState {
+    let same = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+    let mine: Vec<&RuleInfo> = rules
+        .iter()
+        .filter(|r| same(&r.direction, "Inbound") && same(&r.enabled, "True"))
+        .filter(|r| same(r.program.trim(), exe.trim()))
+        .collect();
+    if mine.iter().any(|r| same(&r.action, "Block")) {
+        return RuleState::Blocked;
+    }
+    let covers = |proto: &str| {
+        mine.iter().any(|r| {
+            same(&r.action, "Allow") && (same(&r.protocol, "Any") || same(&r.protocol, proto))
+        })
+    };
+    if covers("TCP") && covers("UDP") {
+        RuleState::Allowed
+    } else {
+        RuleState::Missing
+    }
+}
+
+/// Lit la sortie du script ; `Unknown` si elle est illisible (on ne demande alors rien).
+pub fn parse_state(output: &str, exe: &str) -> RuleState {
+    let json = output.trim();
+    let rules: Result<Vec<RuleInfo>, _> = if json.is_empty() {
+        Ok(Vec::new())
+    } else if json.starts_with('{') {
+        // Selon la version de PowerShell, un tableau d'un élément peut sortir comme un objet seul.
+        serde_json::from_str::<RuleInfo>(json).map(|r| vec![r])
+    } else {
+        serde_json::from_str(json)
+    };
+    match rules {
+        Ok(rules) => decide(&rules, exe),
+        Err(_) => RuleState::Unknown,
     }
 }
 
@@ -71,7 +125,8 @@ pub fn rule_state() -> RuleState {
     let Ok(exe) = std::env::current_exe() else {
         return RuleState::Unknown;
     };
-    let script = check_script(&exe.display().to_string());
+    let exe = exe.display().to_string();
+    let script = check_script(&exe);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;
@@ -82,13 +137,18 @@ pub fn rule_state() -> RuleState {
             .creation_flags(CREATE_NO_WINDOW)
             .output()
         {
-            Ok(out) => parse_state(&String::from_utf8_lossy(&out.stdout)),
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let state = parse_state(&stdout, &exe);
+                tracing::info!(?state, rules = %stdout.trim(), "règles du pare-feu pour PwaMote");
+                state
+            }
             Err(_) => RuleState::Unknown,
         }
     }
     #[cfg(not(windows))]
     {
-        let _ = script;
+        let _ = (script, exe);
         RuleState::Unknown
     }
 }
@@ -145,11 +205,82 @@ mod tests {
     }
 
     #[test]
+    fn the_rule_covers_https_and_mdns() {
+        let s = firewall_script(r"C:\PwaMote\pwamote.exe");
+        assert!(s.contains("-Protocol Any"), "{s}");
+    }
+
+    const EXE: &str = r"C:\Program Files\PwaMote\pwamote-desktop.exe";
+
+    fn rule(action: &str, protocol: &str, program: &str) -> RuleInfo {
+        RuleInfo {
+            action: action.into(),
+            enabled: "True".into(),
+            direction: "Inbound".into(),
+            program: program.into(),
+            protocol: protocol.into(),
+        }
+    }
+
+    #[test]
+    fn our_rule_in_place_means_no_administrator_window() {
+        assert_eq!(
+            decide(&[rule("Allow", "Any", EXE)], EXE),
+            RuleState::Allowed
+        );
+        // Casse différente du chemin : même fichier sous Windows.
+        let lower = EXE.to_lowercase();
+        assert_eq!(
+            decide(&[rule("Allow", "Any", &lower)], EXE),
+            RuleState::Allowed
+        );
+        // Règles séparées TCP et UDP : suffisant aussi.
+        let both = [rule("Allow", "TCP", EXE), rule("Allow", "UDP", EXE)];
+        assert_eq!(decide(&both, EXE), RuleState::Allowed);
+    }
+
+    #[test]
+    fn missing_or_incomplete_rules_ask_once() {
+        assert_eq!(decide(&[], EXE), RuleState::Missing);
+        // Ancienne règle TCP seule : l'annonce mDNS (UDP) ferait surgir la fenêtre de Windows.
+        assert_eq!(
+            decide(&[rule("Allow", "TCP", EXE)], EXE),
+            RuleState::Missing
+        );
+        // Règle PwaMote d'un ancien exécutable : ne compte pas pour celui-ci.
+        let old = rule("Allow", "Any", r"C:\dev\target\debug\pwamote-desktop.exe");
+        assert_eq!(decide(&[old], EXE), RuleState::Missing);
+        // Désactivée ou sortante : ne compte pas.
+        let mut off = rule("Allow", "Any", EXE);
+        off.enabled = "False".into();
+        let mut out = rule("Allow", "Any", EXE);
+        out.direction = "Outbound".into();
+        assert_eq!(decide(&[off, out], EXE), RuleState::Missing);
+    }
+
+    #[test]
+    fn a_block_rule_wins() {
+        let rules = [rule("Allow", "Any", EXE), rule("Block", "UDP", EXE)];
+        assert_eq!(decide(&rules, EXE), RuleState::Blocked);
+    }
+
+    #[test]
     fn parses_the_check_output() {
-        assert_eq!(parse_state("allowed\r\n"), RuleState::Allowed);
-        assert_eq!(parse_state("blocked"), RuleState::Blocked);
-        assert_eq!(parse_state("avertissement\nmissing\n"), RuleState::Missing);
-        assert_eq!(parse_state(""), RuleState::Unknown);
+        let one = format!(
+            r#"{{"action":"Allow","enabled":"True","direction":"Inbound","program":{},"protocol":"Any"}}"#,
+            serde_json::to_string(EXE).unwrap()
+        );
+        assert_eq!(
+            parse_state(&format!("[{one}]\r\n"), EXE),
+            RuleState::Allowed
+        );
+        assert_eq!(parse_state(&one, EXE), RuleState::Allowed);
+        assert_eq!(parse_state("[]", EXE), RuleState::Missing);
+        assert_eq!(parse_state("", EXE), RuleState::Missing);
+        assert_eq!(
+            parse_state("Get-NetFirewallRule : erreur", EXE),
+            RuleState::Unknown
+        );
     }
 
     #[test]

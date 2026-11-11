@@ -49,7 +49,7 @@ Rien à faire : au premier lancement avec internet, PwaMote donne au PC un nom `
 
 ### Le téléphone ne trouve pas le PC
 
-Si la fenêtre indique « En ligne » mais que le téléphone n'arrive pas à se connecter, ouvrez `https://<IP du PC>:8443/healthz` dans Safari. Si la page ne se charge pas, le pare-feu Windows bloque probablement l'exécutable (fréquent après une recompilation : `target\release\pwamote-desktop.exe` est un nouveau programme pour Windows). Le bouton **Autoriser dans le pare-feu** de la fenêtre crée, après confirmation administrateur, une règle entrante TCP limitée au réseau local pour cet exécutable. Côté téléphone, Réglages › Appareil permet toujours de réessayer, de rescanner un QR code ou de recharger la dernière version de l'app.
+Si la fenêtre indique « En ligne » mais que le téléphone n'arrive pas à se connecter, ouvrez `https://<IP du PC>:8443/healthz` dans Safari. Si la page ne se charge pas, le pare-feu Windows bloque probablement l'exécutable (fréquent après une recompilation : `target\release\pwamote-desktop.exe` est un nouveau programme pour Windows). Au lancement, PwaMote vérifie le pare-feu sans droits administrateur et ne demande une confirmation administrateur que si la règle manque ou si une règle de blocage existe. Il crée alors une règle entrante limitée au réseau local pour cet exécutable, en TCP (HTTPS) et UDP (annonce mDNS). Cette demande revient donc une fois par nouvel exécutable, pas à chaque lancement. Côté téléphone, Réglages › Appareil permet toujours de réessayer, de rescanner un QR code ou de recharger la dernière version de l'app.
 
 ## Développer
 
