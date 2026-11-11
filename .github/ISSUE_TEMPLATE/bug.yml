@@ -1,0 +1,51 @@
+# Ouvert depuis l'app (« Signaler un problème ») avec version, système et source préremplis :
+# voir crates/pwamote-server/src/report.rs. Les ids des champs servent au préremplissage.
+name: "Signaler un problème / Report a bug"
+description: "Quelque chose ne marche pas comme prévu / Something doesn't work as expected"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci ! Ce ticket est **public** : n'y mettez ni adresse e-mail, ni adresse IP, ni nom de PC, ni capture montrant des données privées.
+        Thanks! This issue is **public**: don't include email or IP addresses, PC names, or screenshots showing private data.
+  - type: textarea
+    id: description
+    attributes:
+      label: "Que se passe-t-il ? / What happens?"
+      description: "Ce que vous faisiez, ce que vous attendiez, ce qui s'est passé. / What you did, what you expected, what happened."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Pour reproduire / Steps to reproduce"
+      placeholder: "1. …\n2. …"
+  - type: dropdown
+    id: source
+    attributes:
+      label: "Où ? / Where?"
+      options:
+        - "Application de bureau / Desktop app"
+        - "Téléphone / Phone"
+  - type: input
+    id: version
+    attributes:
+      label: "Version de PwaMote / PwaMote version"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: "Système du PC / PC operating system"
+  - type: input
+    id: phone
+    attributes:
+      label: "Système du téléphone / Phone operating system"
+      placeholder: "iOS 18.1"
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Journal (facultatif) / Log (optional)"
+      description: "%APPDATA%\\PwaMote\\logs\\pwamote.log. Relisez-le avant de coller : retirez adresses IP, e-mails et noms. / Review before pasting: remove IP addresses, emails and names."
+      render: text

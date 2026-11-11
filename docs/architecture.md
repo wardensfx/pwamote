@@ -489,6 +489,52 @@ sequenceDiagram
 
 Pourquoi une requête HTTP plutôt que le WebSocket : une capture d'écran d'iPhone pèse plusieurs Mo, bien au-delà de la limite de 64 Ko des messages, et elle ne doit pas retarder les trames du gyroscope. La requête est authentifiée avec le même jeton d'appareil que la session, et le décodage tourne hors de la boucle async (`spawn_blocking`). L'image remplace le contenu du presse-papiers du PC.
 
+## Signaler un problème
+
+Bouton « Signaler un problème » dans l'application de bureau (pied de page) et sur le téléphone
+(Réglages). Le PC choisit le canal (`crates/pwamote-server/src/report.rs`) :
+
+- **support PwaMote** si le PC utilise le service pwamote.app : mode certificat automatique,
+  inscription présente (`relay.json`, nom `<id>.d.pwamote.app`) et service officiel (pas de
+  `PWAMOTE_RELAY_URL`). Le PC envoie `POST https://license.pwamote.app/v1/reports` avec son jeton
+  du service (le même que pour le DNS) et reçoit une référence de ticket ;
+- **issue GitHub** pour toute autre installation (domaine à soi, autorité locale, service
+  auto-hébergé, compilation locale) : modèle `.github/ISSUE_TEMPLATE/bug.yml`, prérempli avec la
+  version, le système du PC et, depuis le téléphone, celui du téléphone. Rien d'autre.
+
+Le téléphone n'a pas le jeton du service : il passe par le PC, avec son jeton d'appairage.
+
+```mermaid
+sequenceDiagram
+  participant T as Téléphone (PWA)
+  participant B as Application de bureau
+  participant P as Serveur PwaMote (PC)
+  participant S as license.pwamote.app
+  participant G as GitHub
+  T->>P: GET /report (Bearer jeton d'appairage)
+  P-->>T: { channel, issue_url, version, os }
+  alt channel = cloud
+    T->>P: POST /report { message, email ?, include_logs, phone }
+    B->>P: send_report (commande Tauri)
+    P->>P: fin du journal caviardée, si la case est cochée
+    P->>S: POST /v1/reports (Bearer id.secret du service)
+    S-->>P: 201 { ticket }
+    P-->>T: { ok, ticket }
+  else channel = github
+    T->>G: issues/new?template=bug.yml&version=…&os=…&phone=…
+    B->>G: open_issue (adresse calculée par le serveur, jamais par l'interface)
+  end
+```
+
+- Journal : seulement si l'utilisateur coche la case ; les 48 derniers Ko de `pwamote.log`
+  (et de `pwamote.old.log` si besoin), coupés sur une ligne, caviardés avant l'envoi :
+  adresses IP v4/v6, e-mails, jetons `Bearer`, champs `secret`/`token`/`password`, longues
+  chaînes aléatoires, nom d'utilisateur dans les chemins, nom public du PC.
+- E-mail facultatif : sans lui, le signalement est anonyme (pas de réponse possible).
+- Le support limite le nombre de signalements par PC (429 : « trop de signalements »).
+- `PWAMOTE_SUPPORT_URL` remplace l'adresse du support (essais).
+- Si l'envoi échoue, l'interface propose GitHub à la place.
+
 ## Actions programmables
 
 Un panneau de boutons façon Stream Deck, ouvert par la pastille **Actions** du téléphone. Tout se définit dans la fenêtre du PC, onglet **Actions** : pages, taille de la grille (2 à 5 colonnes, 1 à 6 lignes), boutons (libellé, icône, couleur), étapes, et champs à demander au téléphone. Le panneau est enregistré dans `%APPDATA%\PwaMote\actions.json` ; au premier lancement, un exemple est proposé (vitesse des vidéos avec S et D, raccourcis, recherche YouTube).

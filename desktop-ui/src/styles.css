@@ -341,3 +341,43 @@ details.advanced > summary::before { content: "›"; display: inline-block; tran
 details.advanced[open] > summary::before { transform: rotate(90deg); }
 .advanced-body { display: flex; flex-direction: column; gap: 12px; }
 .options .field-label:first-of-type { margin-top: 4px; }
+
+/* ---------- Signaler un problème ---------- */
+.footer-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.report-open {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 999px;
+  border: 1px solid var(--edge); background: var(--glass); color: var(--ink-dim); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, transform 0.25s var(--spring);
+}
+.report-open i { color: var(--accent); font-style: normal; }
+.report-open:hover { color: var(--ink); border-color: var(--edge-top); }
+.report-open:active { transform: scale(0.96); }
+.modal-back {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 18px;
+  background: rgba(6, 7, 10, 0.55); backdrop-filter: blur(6px); animation: modal-fade 0.2s ease-out;
+}
+.modal { width: min(500px, 100%); max-height: calc(100vh - 36px); overflow: auto; padding: 20px 20px 18px; background: linear-gradient(180deg, rgba(36, 38, 46, 0.96), rgba(22, 24, 30, 0.96)); animation: modal-rise 0.4s var(--spring); }
+.modal h3 { margin: 0 0 4px; font-size: 18px; font-weight: 650; letter-spacing: -0.02em; }
+@keyframes modal-fade { from { opacity: 0; } }
+@keyframes modal-rise { from { opacity: 0; transform: translateY(12px) scale(0.98); } }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.report-lead { margin: 10px 0 0; color: var(--ink-dim); line-height: 1.45; }
+.report-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.report-form textarea, .report-form input[type="email"] {
+  width: 100%; border-radius: 11px; border: 1px solid var(--edge); background: rgba(0, 0, 0, 0.3); color: var(--ink);
+  font: inherit; padding: 10px 12px; outline: none; user-select: text;
+}
+.report-form textarea { resize: vertical; min-height: 120px; line-height: 1.45; }
+.report-form input[type="email"] { height: 38px; padding: 0 12px; }
+.report-form textarea:focus, .report-form input:focus { border-color: rgba(240, 194, 122, 0.6); }
+.report-form .hint { margin: 0; }
+.report-form .modal-actions { margin-top: 4px; }
+.report-check-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.035); border: 1px solid var(--edge); cursor: pointer; }
+.report-check-row input { margin: 2px 0 0; accent-color: var(--accent); width: 16px; height: 16px; }
+.report-check-row span { display: flex; flex-direction: column; gap: 2px; }
+.report-check-row small { color: var(--ink-faint); font-size: 12px; line-height: 1.35; }
+.report-error { margin: 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.4; color: var(--bad); background: rgba(239, 138, 128, 0.1); border: 1px solid rgba(239, 138, 128, 0.25); }
+.linkish { border: 0; background: none; padding: 0; font: inherit; color: var(--ink); text-decoration: underline; cursor: pointer; }
+.report-done { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; animation: modal-rise 0.4s var(--spring); }
+.report-done p { margin: 0; }
+.report-check { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; font-size: 20px; color: var(--accent-ink); background: var(--accent); box-shadow: 0 8px 24px -10px rgba(240, 194, 122, 0.7); }

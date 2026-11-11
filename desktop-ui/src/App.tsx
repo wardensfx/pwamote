@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { DeckEditor } from "./DeckEditor";
 import { PublicCertCard } from "./PublicCert";
+import { ReportDialog } from "./Report";
 import { countdown, isValidHost, phonesLabel, relativeTime, selectedAddress } from "./format";
 import type { AppConfig, Backend, DeviceView, PairingInfo, ServerStatus, UpdateInfo } from "./ipc";
 import { updateLabel, versionHint, versionText } from "./version";
@@ -47,6 +48,7 @@ export function App(props: { backend: Backend }) {
   const [tab, setTab] = createSignal<"connection" | "actions">("connection");
   const [deckDirty, setDeckDirty] = createSignal(false);
   const [update, setUpdate] = createSignal<UpdateInfo | null>(null);
+  const [reporting, setReporting] = createSignal(false);
   // Ne remplace l'état que s'il a vraiment changé : sinon la liste d'adresses et le QR se redessinent
   // à chaque interrogation périodique.
   const updateStatus = (next: ServerStatus) => {
@@ -362,9 +364,17 @@ export function App(props: { backend: Backend }) {
             </div>
 
             <footer>
-              <span>Données : <span class="mono">{dataDir()}</span></span>
+              <div class="footer-row">
+                <span>Données : <span class="mono">{dataDir()}</span></span>
+                <button class="report-open" onClick={() => setReporting(true)}>
+                  <i aria-hidden="true">⚑</i> Signaler un problème
+                </button>
+              </div>
               <span>Clic droit sur l'icône de la barre système pour quitter.</span>
             </footer>
+            <Show when={reporting()}>
+              <ReportDialog backend={be} onClose={() => setReporting(false)} />
+            </Show>
           </>
         )}
       </Show>

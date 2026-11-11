@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use pwamote_server::cli::{self, Launch};
 use pwamote_server::config::AppConfig;
 use pwamote_server::pwamote_core::actions::Deck;
+use pwamote_server::report::{ReportInfo, ReportReceipt, ReportRequest};
 use pwamote_server::supervisor::{DeviceView, PairingInfo, ServerStatus, Supervisor};
 use pwamote_server::update::{self, UpdateInfo};
 use pwamote_server::{bootstrap, headless, logging};
@@ -172,6 +173,34 @@ fn open_release_page(ctx: &Ctx) -> Result<(), String> {
     #[cfg(not(windows))]
     {
         tracing::info!(url, "page de la release");
+        Ok(())
+    }
+}
+
+#[tauri::command]
+async fn report_info(ctx: State<'_, Ctx>) -> Result<Option<ReportInfo>, String> {
+    Ok(ctx.supervisor.report_info().await)
+}
+
+#[tauri::command]
+async fn send_report(ctx: State<'_, Ctx>, request: ReportRequest) -> Result<ReportReceipt, String> {
+    ctx.supervisor
+        .send_report(&request)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Ouvre l'issue GitHub préremplie. L'adresse est calculée ici, jamais fournie par l'interface.
+#[tauri::command]
+async fn open_issue(ctx: State<'_, Ctx>) -> Result<(), String> {
+    let Some(info) = ctx.supervisor.report_info().await else {
+        return Err("signalement indisponible".into());
+    };
+    #[cfg(windows)]
+    return pwamote_server::platform::windows::shell_open(&info.issue_url);
+    #[cfg(not(windows))]
+    {
+        tracing::info!(url = %info.issue_url, "issue GitHub");
         Ok(())
     }
 }
@@ -351,7 +380,10 @@ fn run_app() {
             has_backdrop,
             data_dir_path,
             get_update_info,
-            open_release
+            open_release,
+            report_info,
+            send_report,
+            open_issue
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

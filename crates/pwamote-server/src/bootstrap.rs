@@ -88,8 +88,15 @@ pub fn open(dir: PathBuf) -> Result<Opened, Box<dyn std::error::Error + Send + S
         machine.clone(),
     );
     let ips: IpProvider = Arc::new(net::local_ipv4s);
+    let reporter = crate::report::Reporter::new(
+        crate::public_cert::dns::http_client(),
+        &crate::report::support_url(),
+        &crate::public_cert::relay::relay_url(),
+        dir.clone(),
+    );
     let supervisor = Supervisor::new(app, pki, persist, config, machine, ips.clone())
-        .with_public_cert(|resolver| public_cert_deps(&dir, resolver, ips));
+        .with_public_cert(|resolver| public_cert_deps(&dir, resolver, ips))
+        .with_reporter(Arc::new(reporter));
     Ok(Opened {
         supervisor: Arc::new(supervisor),
         data_dir: dir,

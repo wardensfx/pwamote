@@ -3432,6 +3432,7 @@ dependencies = [
  "qrcode",
  "rand 0.10.3",
  "rcgen",
+ "regex",
  "reqwest",
  "rust-embed",
  "rustls",

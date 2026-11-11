@@ -21,9 +21,12 @@ use crate::public_cert::{
     cert::PemCert, config::is_public_domain, CertMode, CertResolver, Maintainer, PublicCertConfig,
     PublicCertStatus,
 };
+use crate::report::{
+    ReportError, ReportInfo, ReportReceipt, ReportRequest, ReportSource, Reporter,
+};
 use crate::state::{AppState, Persist};
 use crate::tls::Pki;
-use crate::web::{self, WebState};
+use crate::web::{self, ReportLink, WebState};
 
 /// Fournit les adresses IPv4 locales (remplaçable dans les tests).
 pub type IpProvider = Arc<dyn Fn() -> Vec<Ipv4Addr> + Send + Sync>;
@@ -55,6 +58,7 @@ pub struct Supervisor {
     pki: Arc<Pki>,
     resolver: Arc<CertResolver>,
     public: Option<PublicCert>,
+    reporter: Option<Arc<Reporter>>,
     persist: Arc<dyn Persist>,
     machine: String,
     ips: IpProvider,
@@ -140,6 +144,7 @@ impl Supervisor {
             pki,
             resolver: Arc::new(CertResolver::new()),
             public: None,
+            reporter: None,
             persist,
             machine,
             ips,
@@ -164,6 +169,27 @@ impl Supervisor {
             task: std::sync::Mutex::new(None),
         });
         self
+    }
+
+    /// Active « Signaler un problème » (bureau et téléphone).
+    pub fn with_reporter(mut self, reporter: Arc<Reporter>) -> Self {
+        self.reporter = Some(reporter);
+        self
+    }
+
+    /// Canal de signalement de ce PC, pour l'application de bureau.
+    pub async fn report_info(&self) -> Option<ReportInfo> {
+        let mode = self.config().await.public_cert.mode;
+        Some(self.reporter.as_ref()?.info(mode, ReportSource::Desktop))
+    }
+
+    /// Envoie un signalement écrit dans l'application de bureau.
+    pub async fn send_report(&self, req: &ReportRequest) -> Result<ReportReceipt, ReportError> {
+        let mode = self.config().await.public_cert.mode;
+        match &self.reporter {
+            Some(r) => r.send(mode, ReportSource::Desktop, req).await,
+            None => Err(ReportError::NotCloud),
+        }
     }
 
     pub fn app(&self) -> &Arc<AppState> {
@@ -265,6 +291,10 @@ impl Supervisor {
             app: self.app.clone(),
             pki: self.pki.clone(),
             origin,
+            report: self.reporter.clone().map(|reporter| ReportLink {
+                reporter,
+                mode: cfg.public_cert.mode,
+            }),
         };
         let service = web::router(web_state).into_make_service_with_connect_info::<SocketAddr>();
         let server_handle = handle.clone();

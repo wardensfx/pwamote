@@ -271,6 +271,11 @@ export class RemoteController {
 
   // ----- Collage d'image vers le PC -----
 
+  /** Jeton d'appairage, pour les appels HTTP au PC (signalement). */
+  get token(): string | null {
+    return this.identity?.token ?? null;
+  }
+
   /** Colle sur le PC une image collée dans le champ texte (presse-papiers du PC puis Ctrl+V). */
   async pasteOnPc(clip: PhoneClip): Promise<void> {
     const token = this.identity?.token;

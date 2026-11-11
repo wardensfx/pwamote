@@ -1,10 +1,11 @@
-import { For, Show, type JSX } from "solid-js";
+import { For, Show, createSignal, type JSX } from "solid-js";
 import type { MagnifierFollow } from "../generated/MagnifierFollow";
 import type { PointerMode } from "../generated/PointerMode";
 import type { Settings } from "../generated/Settings";
 import type { RemoteController } from "../lib/remote";
 import { forceUpdate } from "../lib/update";
 import { useScanner } from "./Recovery";
+import { ReportSheet } from "./Report";
 
 function Segmented<T extends string>(props: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (
@@ -48,6 +49,7 @@ function Toggle(props: { label: string; checked: boolean; onChange: (v: boolean)
 export function SettingsSheet(props: { remote: RemoteController; onClose: () => void }): JSX.Element {
   const r = props.remote;
   const scanner = useScanner(r);
+  const [reporting, setReporting] = createSignal(false);
   const s = () => r.settings();
   const set = (f: (s: Settings) => Settings, key: string) => r.edit(f, key);
   const pointer = (p: Partial<Settings["pointer"]>) =>
@@ -56,7 +58,7 @@ export function SettingsSheet(props: { remote: RemoteController; onClose: () => 
     set((x) => ({ ...x, magnifier: { ...x.magnifier, ...p } }), `magnifier.${Object.keys(p).join(",")}`);
 
   return (
-    <>
+    <Show when={!reporting()} fallback={<ReportSheet remote={r} onClose={() => setReporting(false)} />}>
       <div class="sheet-back" onClick={props.onClose} />
       <div class="glass sheet" role="dialog" aria-label="Réglages">
         <div class="grab" />
@@ -135,10 +137,15 @@ export function SettingsSheet(props: { remote: RemoteController; onClose: () => 
             Oublier ce PC
           </button>
         </div>
+        <Show when={r.token}>
+          <button class="report-link" onClick={() => setReporting(true)}>
+            <span aria-hidden="true">⚑</span> Signaler un problème
+          </button>
+        </Show>
         {scanner.view()}
         <p class="note">Version de l'app : {__BUILD_ID__}. « Mettre à jour » recharge la dernière version sans vous déconnecter du PC.</p>
         <p class="note">Les réglages sont enregistrés sur le PC : tous vos téléphones partagent les mêmes. Ces boutons restent disponibles même quand le PC ne répond pas.</p>
       </div>
-    </>
+    </Show>
   );
 }

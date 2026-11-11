@@ -17,6 +17,8 @@ use rust_embed::RustEmbed;
 use std::net::SocketAddr;
 
 use crate::actions::ActionJob;
+use crate::public_cert::CertMode;
+use crate::report::{ReportError, ReportInfo, ReportRequest, ReportSource, Reporter};
 use crate::session::Session;
 use crate::state::{AppState, PasteRefusal};
 use crate::tls::Pki;
@@ -36,6 +38,16 @@ pub struct WebState {
     /// Adresse publique, telle que le téléphone doit l'ouvrir : `https://192.168.1.20:8443`
     /// ou `https://yann.duckdns.org:8443`. `None` tant que le port réel n'est pas connu.
     pub origin: Arc<dyn Fn() -> Option<String> + Send + Sync>,
+    /// « Signaler un problème » depuis le téléphone (absent : la route répond 404).
+    pub report: Option<ReportLink>,
+}
+
+/// Le service de signalement et le mode de certificat de cette écoute (un changement de mode
+/// redémarre l'écoute, donc il est fixe pour la durée de vie du routeur).
+#[derive(Clone)]
+pub struct ReportLink {
+    pub reporter: Arc<Reporter>,
+    pub mode: CertMode,
 }
 
 pub fn router(state: WebState) -> Router {
@@ -47,6 +59,12 @@ pub fn router(state: WebState) -> Router {
         .route(
             "/paste",
             post(paste_from_phone).layer(DefaultBodyLimit::max(crate::clipboard::MAX_BODY_BYTES)),
+        )
+        .route(
+            "/report",
+            get(report_info)
+                .post(send_report)
+                .layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES)),
         )
         .route("/healthz", get(|| async { "ok" }))
         .fallback(static_asset)
@@ -98,6 +116,85 @@ async fn paste_from_phone(State(s): State<WebState>, headers: HeaderMap, body: B
         axum::Json(serde_json::json!({ "ok": message.is_none(), "message": message })),
     )
         .into_response()
+}
+
+fn bearer(headers: &HeaderMap) -> String {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+/// Le téléphone ne voit le signalement qu'avec son jeton d'appairage.
+fn report_link(s: &WebState, headers: &HeaderMap) -> Result<ReportLink, Box<Response>> {
+    let Some(link) = s.report.clone() else {
+        return Err(Box::new(StatusCode::NOT_FOUND.into_response()));
+    };
+    if s.app.authenticate(&bearer(headers)).is_none() {
+        return Err(Box::new(
+            (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(serde_json::json!({ "ok": false, "message": "appareil non appairé" })),
+            )
+                .into_response(),
+        ));
+    }
+    Ok(link)
+}
+
+/// GET /report : canal (support PwaMote ou GitHub) et lien de l'issue préremplie.
+async fn report_info(State(s): State<WebState>, headers: HeaderMap) -> Response {
+    match report_link(&s, &headers) {
+        Ok(link) => {
+            let info: ReportInfo = link.reporter.info(link.mode, ReportSource::Phone);
+            axum::Json(info).into_response()
+        }
+        Err(r) => *r,
+    }
+}
+
+/// POST /report : envoie le signalement au support PwaMote, via ce PC (seul à avoir le jeton).
+async fn send_report(State(s): State<WebState>, headers: HeaderMap, body: Bytes) -> Response {
+    let link = match report_link(&s, &headers) {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    let req: ReportRequest = match serde_json::from_slice(&body) {
+        Ok(r) => r,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({ "ok": false, "message": "formulaire illisible" })),
+            )
+                .into_response()
+        }
+    };
+    match link
+        .reporter
+        .send(link.mode, ReportSource::Phone, &req)
+        .await
+    {
+        Ok(receipt) => {
+            axum::Json(serde_json::json!({ "ok": true, "ticket": receipt.ticket })).into_response()
+        }
+        Err(e) => {
+            let status = match e {
+                ReportError::NotCloud => StatusCode::CONFLICT,
+                ReportError::Invalid(_) => StatusCode::BAD_REQUEST,
+                ReportError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+                ReportError::Rejected(_) | ReportError::Network(_) => StatusCode::BAD_GATEWAY,
+            };
+            tracing::warn!(error = %e, "signalement du téléphone non envoyé");
+            (
+                status,
+                axum::Json(serde_json::json!({ "ok": false, "message": e.to_string() })),
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn ca_cer(State(s): State<WebState>) -> Response {

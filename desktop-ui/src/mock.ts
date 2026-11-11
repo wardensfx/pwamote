@@ -148,5 +148,21 @@ export function mockBackend(): Backend {
     },
     openRelease: async () => void window.open("https://github.com/wardensfx/pwamote/releases/tag/v1.3.0", "_blank"),
     onUpdateChanged: async () => () => {},
+    // ?report=github simule un PC hors du service pwamote.app, ?report=fail un envoi refusé.
+    reportInfo: async () => {
+      const github = new URLSearchParams(location.search).get("report") === "github";
+      return {
+        channel: github ? "github" : "cloud",
+        issue_url: "https://github.com/wardensfx/pwamote/issues/new?template=bug.yml&version=1.2.0&os=Windows+11+23H2",
+        version: "1.2.0",
+        os: "Windows 11 23H2 (build 22631)",
+      };
+    },
+    sendReport: async () => {
+      await new Promise((r) => setTimeout(r, 600));
+      if (new URLSearchParams(location.search).get("report") === "fail") throw new Error("support PwaMote injoignable : délai dépassé");
+      return { ticket: "K7Q2MX" };
+    },
+    openIssue: async () => void window.open("https://github.com/wardensfx/pwamote/issues/new?template=bug.yml", "_blank"),
   };
 }
