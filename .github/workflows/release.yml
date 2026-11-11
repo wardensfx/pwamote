@@ -2,6 +2,8 @@ name: Release
 
 # Pousser un tag de version publie une release :
 #   git tag v1.2.3 && git push origin v1.2.3
+# Ne pas créer la release à la main sur GitHub : les releases sont immuables, une release
+# publiée sans fichiers ne peut plus être complétée et son tag ne peut plus resservir.
 # La CI complète tourne avec la version injectée, puis la release GitHub est créée avec
 # l'installeur, le serveur seul, leurs empreintes SHA-256 et le changelog depuis le tag précédent.
 on:
@@ -82,10 +84,20 @@ jobs:
         run: |
           flags=()
           [[ "$PRERELEASE" == "true" ]] && flags+=(--prerelease) || flags+=(--latest)
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            # Relance du workflow : on remplace notes et fichiers.
-            gh release edit "$TAG" --title "PwaMote $VERSION" --notes-file notes.md "${flags[@]}"
+          # Les releases du dépôt sont immuables : une fois publiée, une release ne peut plus
+          # recevoir de fichiers. On remplit donc un brouillon, puis on le publie en dernier.
+          # (Liste complète : l'API par tag ne voit pas les brouillons.)
+          state="$(gh api "repos/$GH_REPO/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | \"\\(.draft) \\(.immutable)\"" | head -n1)"
+          if [[ -n "$state" ]]; then
+            read -r draft immutable <<< "$state"
+            if [[ "$draft" != "true" && "$immutable" == "true" ]]; then
+              echo "::error::La release $TAG est déjà publiée et immuable (créée à la main sur GitHub ?) : impossible d'y ajouter les fichiers. Supprimer cette release et publier un nouveau tag (le nom $TAG ne peut plus être réutilisé). Pour publier, pousser seulement le tag : git tag vX.Y.Z && git push origin vX.Y.Z."
+              exit 1
+            fi
+            # Relance du workflow ou brouillon existant : on remplace notes et fichiers.
+            gh release edit "$TAG" --title "PwaMote $VERSION" --notes-file notes.md
             gh release upload "$TAG" dist/* --clobber
           else
-            gh release create "$TAG" dist/* --verify-tag --title "PwaMote $VERSION" --notes-file notes.md "${flags[@]}"
+            gh release create "$TAG" dist/* --draft --verify-tag --title "PwaMote $VERSION" --notes-file notes.md
           fi
+          gh release edit "$TAG" --draft=false "${flags[@]}"
