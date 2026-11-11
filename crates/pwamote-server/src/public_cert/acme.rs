@@ -90,30 +90,28 @@ impl LetsEncryptIssuer {
         let ids = [Identifier::Dns(domain.to_string())];
         let mut order = account.new_order(&NewOrder::new(&ids)).await.map_err(err)?;
 
-        let mut published = None;
-        {
-            let mut authorizations = order.authorizations();
-            while let Some(result) = authorizations.next().await {
-                let mut authz = result.map_err(err)?;
-                match authz.status {
-                    AuthorizationStatus::Pending => {}
-                    AuthorizationStatus::Valid => continue,
-                    other => return Err(format!("autorisation dans l'état {other:?}")),
+        with_challenge(dns, async |txt: &TxtChallenge<'_>| {
+            {
+                let mut authorizations = order.authorizations();
+                while let Some(result) = authorizations.next().await {
+                    let mut authz = result.map_err(err)?;
+                    match authz.status {
+                        AuthorizationStatus::Pending => {}
+                        AuthorizationStatus::Valid => continue,
+                        other => return Err(format!("autorisation dans l'état {other:?}")),
+                    }
+                    let mut challenge = authz
+                        .challenge(ChallengeType::Dns01)
+                        .ok_or("Let's Encrypt ne propose pas de défi DNS-01")?;
+                    let value = challenge.key_authorization().dns_value();
+                    txt.publish(&value).await?;
+                    if !self.wait_for_txt(domain, &value).await {
+                        tracing::warn!("le défi n'est pas encore visible, on tente quand même");
+                    }
+                    challenge.set_ready().await.map_err(err)?;
                 }
-                let mut challenge = authz
-                    .challenge(ChallengeType::Dns01)
-                    .ok_or("Let's Encrypt ne propose pas de défi DNS-01")?;
-                let value = challenge.key_authorization().dns_value();
-                dns.set_txt(&value).await.map_err(err)?;
-                published = Some(value.clone());
-                if !self.wait_for_txt(domain, &value).await {
-                    tracing::warn!("le défi n'est pas encore visible, on tente quand même");
-                }
-                challenge.set_ready().await.map_err(err)?;
             }
-        }
 
-        let result = async {
             let retry = RetryPolicy::new()
                 .initial_delay(Duration::from_secs(2))
                 .timeout(Duration::from_secs(180));
@@ -130,15 +128,8 @@ impl LetsEncryptIssuer {
                 chain_pem,
                 key_pem: key.serialize_pem(),
             })
-        }
-        .await;
-
-        if published.is_some() {
-            if let Err(e) = dns.clear_txt().await {
-                tracing::warn!(error = %e, "défi DNS non retiré");
-            }
-        }
-        result
+        })
+        .await
     }
 
     /// Attend que le TXT soit visible depuis un résolveur public (au plus deux minutes).
@@ -175,6 +166,40 @@ impl Issuer for LetsEncryptIssuer {
     ) -> BoxFuture<'a, Result<PemCert, String>> {
         Box::pin(self.run(domain, cfg, dns))
     }
+}
+
+/// Défi DNS-01 publié pendant une demande : on se souvient s'il faut le retirer.
+pub struct TxtChallenge<'a> {
+    dns: &'a dyn DnsApi,
+    published: std::sync::atomic::AtomicBool,
+}
+
+impl TxtChallenge<'_> {
+    /// Publie le TXT. Marqué avant l'appel : une publication à moitié faite se retire aussi.
+    pub async fn publish(&self, value: &str) -> Result<(), String> {
+        self.published
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.dns.set_txt(value).await.map_err(err)
+    }
+}
+
+/// Mène `work` puis retire le défi s'il a été publié, que la demande ait réussi ou non :
+/// sinon le TXT reste dans la zone après une erreur de Let's Encrypt.
+pub async fn with_challenge<T>(
+    dns: &dyn DnsApi,
+    work: impl AsyncFnOnce(&TxtChallenge<'_>) -> Result<T, String>,
+) -> Result<T, String> {
+    let txt = TxtChallenge {
+        dns,
+        published: false.into(),
+    };
+    let result = work(&txt).await;
+    if txt.published.into_inner() {
+        if let Err(e) = dns.clear_txt().await {
+            tracing::warn!(error = %e, "défi DNS non retiré");
+        }
+    }
+    result
 }
 
 /// Clé et demande de signature (CSR) pour `domain`. Le sujet est vide : rcgen y met sinon
@@ -230,6 +255,43 @@ mod tests {
             })
             .collect();
         assert_eq!(sans, vec!["DNSName(k3x9f2ab7qzm.pwamote.app)"]);
+    }
+
+    use super::super::dns::testing::FakeDns;
+
+    #[tokio::test]
+    async fn the_challenge_is_removed_even_when_the_request_fails_after_publishing() {
+        let dns = FakeDns::default();
+        let r: Result<(), String> = with_challenge(&dns, async |txt: &TxtChallenge<'_>| {
+            txt.publish("defi").await?;
+            Err("Let's Encrypt a refusé set_ready".into())
+        })
+        .await;
+        assert!(r.is_err());
+        assert_eq!(*dns.txt_history.lock().unwrap(), vec!["defi".to_string()]);
+        assert_eq!(*dns.txt.lock().unwrap(), None, "TXT retiré malgré l'erreur");
+    }
+
+    #[tokio::test]
+    async fn a_failed_publication_is_cleaned_up_too() {
+        let dns = FakeDns::default();
+        *dns.txt.lock().unwrap() = Some("reste d'une demande précédente".into());
+        dns.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        let r: Result<(), String> = with_challenge(&dns, async |txt: &TxtChallenge<'_>| {
+            txt.publish("defi").await
+        })
+        .await;
+        assert!(r.is_err());
+        assert_eq!(*dns.txt.lock().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn nothing_is_removed_when_nothing_was_published() {
+        let dns = FakeDns::default();
+        *dns.txt.lock().unwrap() = Some("autre".into());
+        let r = with_challenge(&dns, async |_: &TxtChallenge<'_>| Ok::<_, String>(7)).await;
+        assert_eq!(r, Ok(7));
+        assert_eq!(dns.txt.lock().unwrap().as_deref(), Some("autre"));
     }
 
     #[test]
