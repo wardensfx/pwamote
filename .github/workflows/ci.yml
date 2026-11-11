@@ -24,6 +24,10 @@ env:
   # Seuls les binaires de release vérifient les mises à jour (voir crates/pwamote-server/src/update.rs) :
   # une compilation locale ou une CI ordinaire ne contacte jamais GitHub.
   PWAMOTE_RELEASE_REPO: ${{ inputs.version != '' && github.repository || '' }}
+  # Signature Authenticode (Azure Artifact Signing), uniquement pour les releases et seulement
+  # quand les variables du dépôt sont renseignées : sans elles, les binaires restent non signés
+  # comme avant. Mise en place : docs/signature-windows.md.
+  SIGN_ENABLED: ${{ inputs.version != '' && vars.AZURE_SIGNING_ACCOUNT != '' }}
 
 jobs:
   client:
@@ -121,6 +125,24 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo build --release -p pwamote-server
+      - name: Signer le serveur
+        if: env.SIGN_ENABLED == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files: ${{ github.workspace }}\target\release\pwamote-server.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+      - name: Vérifier la signature
+        if: env.SIGN_ENABLED == 'true'
+        shell: pwsh
+        run: ./scripts/verify-signature.ps1 target/release/pwamote-server.exe
       - uses: actions/upload-artifact@v4
         with:
           name: pwamote-server-windows
@@ -154,9 +176,41 @@ jobs:
           cache-dependency-path: desktop-ui/package-lock.json
       - run: npm ci
         working-directory: desktop-ui
+      # Tauri signe lui-même l'exécutable de l'application, l'installeur et le désinstalleur
+      # (bundle > windows > signCommand), après ses propres retouches du binaire : une signature
+      # posée avant serait invalidée. La configuration n'est ajoutée qu'en release signée.
+      - name: Préparer la signature
+        if: env.SIGN_ENABLED == 'true'
+        shell: bash
+        env:
+          ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        run: |
+          for v in ENDPOINT ACCOUNT PROFILE; do
+            [[ -n "${!v}" ]] || { echo "::error::Variable AZURE_SIGNING_$v manquante"; exit 1; }
+          done
+          cargo install artifact-signing-cli --version 0.12.0 --locked
+          node -e '
+            const cmd = `artifact-signing-cli -e ${process.env.ENDPOINT} -a ${process.env.ACCOUNT} -c ${process.env.PROFILE} -d PwaMote %1`;
+            require("fs").writeFileSync("crates/pwamote-desktop/tauri.signing.json", JSON.stringify({ bundle: { windows: { signCommand: cmd } } }));
+          '
       # Le CLI Tauri est installé dans desktop-ui ; on le lance depuis le dossier du crate.
-      - run: npm exec --prefix ../../desktop-ui -- tauri build --ci
+      - name: Construire l'installeur
+        shell: bash
         working-directory: crates/pwamote-desktop
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          args=(--ci)
+          [[ -f tauri.signing.json ]] && args+=(--config tauri.signing.json)
+          npm exec --prefix ../../desktop-ui -- tauri build "${args[@]}"
+      - name: Vérifier les signatures
+        if: env.SIGN_ENABLED == 'true'
+        shell: pwsh
+        run: ./scripts/verify-signature.ps1 target/release/pwamote-desktop.exe (Get-Item target/release/bundle/nsis/*.exe).FullName
       - uses: actions/upload-artifact@v4
         with:
           name: pwamote-installer-windows

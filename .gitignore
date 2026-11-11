@@ -6,3 +6,4 @@ client/dist/
 .env
 desktop-ui/dist/
 crates/pwamote-desktop/gen/
+crates/pwamote-desktop/tauri.signing.json
