@@ -21,7 +21,7 @@ pub enum DnsProvider {
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum CertMode {
-    /// Par défaut : un nom `<id>.pwamote.app` attribué par le service PwaMote, sans réglage.
+    /// Par défaut : un nom `<id>.d.pwamote.app` attribué par le service PwaMote, sans réglage.
     #[default]
     Auto,
     /// Un domaine à soi (DuckDNS, Cloudflare), réglé à la main.

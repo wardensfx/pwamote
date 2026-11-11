@@ -45,7 +45,7 @@ Ajoutez ensuite la page à l'écran d'accueil (Partager › Sur l'écran d'accue
 
 ### HTTPS automatique (par défaut)
 
-Rien à faire : au premier lancement avec internet, PwaMote donne au PC un nom `xxxx.pwamote.app` qui pointe vers son IP locale, obtient un vrai certificat Let's Encrypt et le renouvelle seul. Le QR code utilise alors ce nom, et l'iPhone n'a **aucun profil à installer**. Sans internet, le certificat local (et le profil ci-dessus) prend le relais. Domaine personnel ou mode local seul : fenêtre PwaMote › **HTTPS de l'iPhone**. Détails dans [docs/architecture.md](docs/architecture.md), service DNS dans [relay/](relay/README.md).
+Rien à faire : au premier lancement avec internet, PwaMote donne au PC un nom `xxxx.d.pwamote.app` qui pointe vers son IP locale, obtient un vrai certificat Let's Encrypt et le renouvelle seul. Le QR code utilise alors ce nom, et l'iPhone n'a **aucun profil à installer**. Sans internet, le certificat local (et le profil ci-dessus) prend le relais. Domaine personnel ou mode local seul : fenêtre PwaMote › **HTTPS de l'iPhone**. Détails dans [docs/architecture.md](docs/architecture.md), service DNS dans [relay/](relay/README.md).
 
 ### Le téléphone ne trouve pas le PC
 

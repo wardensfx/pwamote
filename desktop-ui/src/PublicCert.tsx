@@ -15,7 +15,7 @@ const MODES: { mode: CertMode; label: string }[] = [
 ];
 
 /**
- * HTTPS de l'iPhone. Par défaut automatique : le PC reçoit un nom `<id>.pwamote.app` et un
+ * HTTPS de l'iPhone. Par défaut automatique : le PC reçoit un nom `<id>.d.pwamote.app` et un
  * certificat Let's Encrypt, sans rien régler. Le domaine personnel reste possible ; « Local seul »
  * garde l'autorité locale (profil à installer sur l'iPhone).
  */

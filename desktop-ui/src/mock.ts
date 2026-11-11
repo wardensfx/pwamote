@@ -96,7 +96,7 @@ export function mockBackend(): Backend {
     const token = pc.provider.kind === "duck_dns" ? pc.provider.token : pc.provider.api_token;
     const setup = new URLSearchParams(location.search).get("setup") === "1";
     const ready = (pc.mode === "auto" && !setup) || (pc.mode === "custom" && pc.domain.includes(".") && token !== "");
-    const name = pc.mode === "auto" ? "k3x9f2ab7qzm.pwamote.app" : pc.domain;
+    const name = pc.mode === "auto" ? "k3x9f2ab7qzm.d.pwamote.app" : pc.domain;
     const now = Math.floor(Date.now() / 1000);
     const public_cert: ServerStatus["public_cert"] = {
       phase: pc.mode === "off" ? "disabled" : setup ? "obtaining" : ready ? "active" : "incomplete",

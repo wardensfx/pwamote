@@ -194,7 +194,7 @@ Safari n'expose le gyroscope et ne permet l'installation hors-ligne qu'en HTTPS.
 
 | Mode | Nom servi | Réglage | iPhone |
 |---|---|---|---|
-| **Automatique** (par défaut) | `<id>.pwamote.app`, attribué par le [service DNS PwaMote](../relay/README.md) | aucun | rien à installer |
+| **Automatique** (par défaut) | `<id>.d.pwamote.app`, attribué par le [service DNS PwaMote](../relay/README.md) | aucun | rien à installer |
 | Mon domaine | `pc.mondomaine.fr` (Cloudflare) ou `xxx.duckdns.org` | domaine + jeton | rien à installer |
 | Local seul | IP, `pwamote-<machine>.local` | aucun | profil à installer une fois |
 
@@ -211,13 +211,13 @@ sequenceDiagram
   participant CF as DNS Cloudflare (pwamote.app)
   participant LE as Let's Encrypt
   PC->>R: POST /v1/register (une seule fois)
-  R-->>PC: id, secret, k3x9f2ab7qzm.pwamote.app (relay.json)
+  R-->>PC: id, secret, k3x9f2ab7qzm.d.pwamote.app (relay.json)
   PC->>R: PUT /v1/address 192.168.1.20 (réseaux privés seulement)
-  R->>CF: A k3x9f2ab7qzm → 192.168.1.20
-  PC->>LE: commande pour k3x9f2ab7qzm.pwamote.app
+  R->>CF: A k3x9f2ab7qzm.d → 192.168.1.20
+  PC->>LE: commande pour k3x9f2ab7qzm.d.pwamote.app
   LE-->>PC: défi DNS-01
   PC->>R: PUT /v1/challenge
-  R->>CF: TXT _acme-challenge.k3x9f2ab7qzm
+  R->>CF: TXT _acme-challenge.k3x9f2ab7qzm.d
   LE->>CF: lit le TXT
   LE-->>PC: certificat (clé restée sur le PC)
   PC->>R: DELETE /v1/challenge

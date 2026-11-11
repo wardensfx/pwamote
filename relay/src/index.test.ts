@@ -94,7 +94,7 @@ describe("inscription", () => {
   it("donne un nom unique et un secret, conservé seulement sous forme d'empreinte", async () => {
     const a = await registered();
     const b = await registered();
-    expect(a.domain).toMatch(/^[a-z2-7]{12}\.pwamote\.app$/);
+    expect(a.domain).toMatch(/^[a-z2-7]{12}\.d\.pwamote\.app$/);
     expect(a.id).not.toBe(b.id);
     const stored = kv.map.get(`dev:${a.id}`)!;
     expect(stored).not.toContain(a.secret);
@@ -135,7 +135,35 @@ describe("adresse et défi", () => {
   });
 });
 
+describe("suffixe des noms (Public Suffix List)", () => {
+  it("les PC sont nommés sous d.pwamote.app, le site et les services restent à part", async () => {
+    const d = await registered();
+    expect(d.domain).toBe(`${d.id}.d.pwamote.app`);
+    const rsp = await call("PUT", "/v1/address", { auth: d.auth, body: { ip: "192.168.1.20" } });
+    expect(await rsp.json()).toEqual({ domain: `${d.id}.d.pwamote.app`, ip: "192.168.1.20" });
+  });
+  it("le suffixe se règle (DEVICE_SUFFIX)", async () => {
+    env.DEVICE_SUFFIX = "pc.example.org";
+    const d = await registered();
+    expect(d.domain).toBe(`${d.id}.pc.example.org`);
+  });
+  it("un PC inscrit avec l'ancien nom <id>.pwamote.app passe au nouveau, l'ancien est retiré", async () => {
+    const d = await registered();
+    cf.recs.push({ id: "old1", type: "A", name: `${d.id}.pwamote.app`, content: "192.168.1.20" });
+    const rsp = await call("PUT", "/v1/address", { auth: d.auth, body: { ip: "192.168.1.20" } });
+    expect(((await rsp.json()) as { domain: string }).domain).toBe(`${d.id}.d.pwamote.app`);
+    expect(cf.recs).toEqual([expect.objectContaining({ type: "A", name: `${d.id}.d.pwamote.app` })]);
+  });
+});
+
 describe("ménage", () => {
+  it("retire aussi les anciens noms <id>.pwamote.app des PC disparus", async () => {
+    const old = await registered();
+    cf.recs.push({ id: "old1", type: "A", name: `${old.id}.pwamote.app`, content: "10.0.0.9" });
+    expect(await sweep(env, Date.now() + 181 * 86_400_000)).toBe(1);
+    expect(cf.recs).toHaveLength(0);
+  });
+
   it("supprime les PC muets depuis 180 jours et leurs enregistrements", async () => {
     const old = await registered();
     const fresh = await registered();

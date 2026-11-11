@@ -70,10 +70,10 @@ describe("publicCertSummary", () => {
   });
 
   it("actif : jours restants et serveur de test signalé", () => {
-    const s = publicCertSummary({ ...base, phase: "active", domain: "k3x9f2ab7qzm.pwamote.app", expires_at: now + 45 * 86400, staging: true }, now);
+    const s = publicCertSummary({ ...base, phase: "active", domain: "k3x9f2ab7qzm.d.pwamote.app", expires_at: now + 45 * 86400, staging: true }, now);
     expect(s.tone).toBe("ok");
     expect(s.title).toBe("Let's Encrypt (serveur de test) · valide encore 45 j");
-    expect(s.detail).toContain("k3x9f2ab7qzm.pwamote.app");
+    expect(s.detail).toContain("k3x9f2ab7qzm.d.pwamote.app");
   });
 
   it("actif avec avertissement : ton d'attente et message affiché", () => {

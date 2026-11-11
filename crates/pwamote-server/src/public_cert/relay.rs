@@ -1,5 +1,7 @@
 //! Client du service DNS PwaMote (`relay/`, Worker Cloudflare) : comme `plex.direct`,
-//! chaque PC reçoit un nom `<id>.pwamote.app` qui pointe vers son IP locale.
+//! chaque PC reçoit un nom `<id>.d.pwamote.app` qui pointe vers son IP locale.
+//! Le service peut changer le suffixe (ex. ancien `<id>.pwamote.app`) : le nouveau nom,
+//! renvoyé à chaque publication d'adresse, remplace l'ancien dans `relay.json`.
 
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
@@ -91,8 +93,28 @@ impl RelayClient {
             http: self.http.clone(),
             base: self.base.clone(),
             creds,
+            path: self.path.clone(),
         }
     }
+}
+
+/// Nouveau nom annoncé par le service, s'il est bien un nom de ce PC (`<id>.…`) et différent.
+fn renamed(creds: &RelayCredentials, announced: Option<&str>) -> Option<String> {
+    let name = announced?;
+    let suffix = name.strip_prefix(&format!("{}.", creds.id))?;
+    let valid = !suffix.is_empty()
+        && suffix.split('.').count() >= 2
+        && suffix.split('.').all(|l| {
+            !l.is_empty()
+                && l.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        });
+    (valid && name != creds.domain).then(|| name.to_string())
+}
+
+#[derive(Deserialize)]
+struct AddressReply {
+    domain: Option<String>,
 }
 
 /// Le service PwaMote vu comme un fournisseur DNS : il ne touche qu'au nom de ce PC.
@@ -100,6 +122,8 @@ pub struct RelayDns {
     http: reqwest::Client,
     base: String,
     creds: RelayCredentials,
+    /// `relay.json`, mis à jour si le service renomme ce PC.
+    path: PathBuf,
 }
 
 impl RelayDns {
@@ -108,7 +132,7 @@ impl RelayDns {
         method: reqwest::Method,
         path: &str,
         body: Option<serde_json::Value>,
-    ) -> Result<(), DnsError> {
+    ) -> Result<reqwest::Response, DnsError> {
         let mut req = self
             .http
             .request(method, format!("{}{path}", self.base))
@@ -116,27 +140,54 @@ impl RelayDns {
         if let Some(b) = body {
             req = req.json(&b);
         }
-        check(req.send().await?).await.map(drop)
+        check(req.send().await?).await
+    }
+
+    async fn publish_address(&self, ip: Ipv4Addr) -> Result<(), DnsError> {
+        let rsp = self
+            .send(
+                reqwest::Method::PUT,
+                "/v1/address",
+                Some(json!({ "ip": ip.to_string() })),
+            )
+            .await?;
+        let reply: Option<AddressReply> = rsp.json().await.ok();
+        let announced = reply.and_then(|r| r.domain);
+        if let Some(domain) = renamed(&self.creds, announced.as_deref()) {
+            let creds = RelayCredentials {
+                domain: domain.clone(),
+                ..self.creds.clone()
+            };
+            let json = serde_json::to_string_pretty(&creds).expect("sérialisation");
+            write_atomic(&self.path, &json)
+                .map_err(|e| DnsError::Rejected(format!("nouveau nom non enregistré : {e}")))?;
+            tracing::info!(old = %self.creds.domain, new = %domain, "le service DNS PwaMote a renommé ce PC");
+        }
+        Ok(())
     }
 }
 
 impl DnsApi for RelayDns {
     fn set_txt<'a>(&'a self, value: &'a str) -> BoxFuture<'a, Result<(), DnsError>> {
-        Box::pin(self.send(
-            reqwest::Method::PUT,
-            "/v1/challenge",
-            Some(json!({ "value": value })),
-        ))
+        Box::pin(async move {
+            self.send(
+                reqwest::Method::PUT,
+                "/v1/challenge",
+                Some(json!({ "value": value })),
+            )
+            .await
+            .map(drop)
+        })
     }
     fn clear_txt(&self) -> BoxFuture<'_, Result<(), DnsError>> {
-        Box::pin(self.send(reqwest::Method::DELETE, "/v1/challenge", None))
+        Box::pin(async move {
+            self.send(reqwest::Method::DELETE, "/v1/challenge", None)
+                .await
+                .map(drop)
+        })
     }
     fn set_address(&self, ip: Ipv4Addr) -> BoxFuture<'_, Result<(), DnsError>> {
-        Box::pin(self.send(
-            reqwest::Method::PUT,
-            "/v1/address",
-            Some(json!({ "ip": ip.to_string() })),
-        ))
+        Box::pin(self.publish_address(ip))
     }
 }
 
@@ -170,7 +221,7 @@ mod tests {
                         *regs.lock().unwrap() += 1;
                         (
                             StatusCode::CREATED,
-                            Json(json!({"id": "abcdefghijkl", "secret": "s3cret", "domain": "abcdefghijkl.pwamote.app"})),
+                            Json(json!({"id": "abcdefghijkl", "secret": "s3cret", "domain": "abcdefghijkl.d.pwamote.app"})),
                         )
                     }
                 }),
@@ -184,8 +235,9 @@ mod tests {
                     if b["ip"] == "8.8.8.8" {
                         return (StatusCode::BAD_REQUEST, Json(json!({"error": "seules les adresses d'un réseau privé sont acceptées"})));
                     }
+                    let ip = b["ip"].clone();
                     log.lock().unwrap().push(("address".into(), Some(b)));
-                    (StatusCode::OK, Json(json!({})))
+                    (StatusCode::OK, Json(json!({"domain": "abcdefghijkl.d.pwamote.app", "ip": ip})))
                 }),
             )
             .route(
@@ -215,7 +267,7 @@ mod tests {
         let client = RelayClient::new(http_client(), &base, dir.path().join("relay.json"));
         assert!(client.saved().is_none());
         let a = client.register().await.unwrap();
-        assert_eq!(a.domain, "abcdefghijkl.pwamote.app");
+        assert_eq!(a.domain, "abcdefghijkl.d.pwamote.app");
         // Nouveau lancement : même nom, sans nouvelle inscription.
         let again = RelayClient::new(http_client(), &base, dir.path().join("relay.json"));
         assert_eq!(again.saved(), Some(a.clone()));
@@ -249,12 +301,63 @@ mod tests {
                 secret: "faux".into(),
                 domain: String::new(),
             },
+            path: dir.path().join("autre.json"),
         };
         let err = wrong
             .set_address("10.0.0.1".parse().unwrap())
             .await
             .unwrap_err();
         assert!(err.to_string().contains("identifiants invalides"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn adopts_the_new_name_given_by_the_service() {
+        // PC inscrit du temps des noms `<id>.pwamote.app`.
+        let (base, _, regs) = fake_relay().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("relay.json");
+        let old = RelayCredentials {
+            id: "abcdefghijkl".into(),
+            secret: "s3cret".into(),
+            domain: "abcdefghijkl.pwamote.app".into(),
+        };
+        std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+        let client = RelayClient::new(http_client(), &base, path.clone());
+        let dns = client.dns(client.register().await.unwrap());
+        dns.set_address("192.168.1.20".parse().unwrap())
+            .await
+            .unwrap();
+        let saved = client.saved().unwrap();
+        assert_eq!(saved.domain, "abcdefghijkl.d.pwamote.app");
+        assert_eq!((saved.id, saved.secret), (old.id, old.secret));
+        assert_eq!(
+            *regs.lock().unwrap(),
+            0,
+            "même inscription, pas de nouvel identifiant"
+        );
+    }
+
+    #[test]
+    fn only_a_name_of_this_pc_is_adopted() {
+        let creds = RelayCredentials {
+            id: "abcdefghijkl".into(),
+            secret: "s".into(),
+            domain: "abcdefghijkl.pwamote.app".into(),
+        };
+        assert_eq!(
+            renamed(&creds, Some("abcdefghijkl.d.pwamote.app")),
+            Some("abcdefghijkl.d.pwamote.app".to_string())
+        );
+        assert_eq!(
+            renamed(&creds, Some("abcdefghijkl.pwamote.app")),
+            None,
+            "inchangé"
+        );
+        assert_eq!(renamed(&creds, None), None, "ancien service sans nom");
+        assert_eq!(renamed(&creds, Some("autrepc12345.d.pwamote.app")), None);
+        assert_eq!(renamed(&creds, Some("abcdefghijkl.")), None);
+        assert_eq!(renamed(&creds, Some("abcdefghijkl.d.pwamote.app/x")), None);
+        assert_eq!(renamed(&creds, Some("abcdefghijkl.d pwamote.app")), None);
     }
 
     #[test]

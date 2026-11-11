@@ -86,10 +86,13 @@ pub enum Resolved {
     Failed(String),
 }
 
-/// Trouve le domaine à certifier selon le mode : `<id>.pwamote.app` ou domaine personnel.
+/// Trouve le domaine à certifier selon le mode : `<id>.d.pwamote.app` ou domaine personnel.
 pub trait Targets: Send + Sync {
     fn resolve<'a>(&'a self, cfg: &'a PublicCertConfig, online: bool) -> BoxFuture<'a, Resolved>;
 }
+/// Délai avant de repasser quand le service vient de renommer le PC.
+const RENAMED_RECHECK: Duration = Duration::from_secs(1);
+
 pub type Clock = Arc<dyn Fn() -> OffsetDateTime + Send + Sync>;
 pub type Ipv4Provider = Arc<dyn Fn() -> Vec<Ipv4Addr> + Send + Sync>;
 
@@ -253,6 +256,20 @@ impl Maintainer {
                         Ok(()) => {
                             tracing::info!(%ip, %domain, "adresse DNS mise à jour");
                             mem.published_ip = Some(ip);
+                            // Le service PwaMote a pu renommer ce PC (changement de suffixe) :
+                            // repasser tout de suite pour obtenir le certificat du nouveau nom.
+                            if cfg.mode == CertMode::Auto {
+                                if let Resolved::Ready(t) =
+                                    self.deps.targets.resolve(cfg, online).await
+                                {
+                                    if t.domain != domain {
+                                        tracing::info!(old = %domain, new = %t.domain, "nouveau nom PwaMote pour ce PC");
+                                        status.message =
+                                            Some(format!("Nouveau nom : {}…", t.domain));
+                                        return self.finish(status, now, RENAMED_RECHECK);
+                                    }
+                                }
+                            }
                         }
                         Err(e) => {
                             address_warning =
@@ -595,6 +612,42 @@ mod tests {
         w.m.tick(&auto).await;
         assert_eq!(w.targets.registrations.load(Ordering::SeqCst), 1);
         assert_eq!(w.issuer.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn switches_at_once_when_the_service_renames_the_pc() {
+        let w = world(true);
+        let auto = PublicCertConfig::default();
+        w.m.tick(&auto).await;
+        assert_eq!(
+            w.m.status().domain.as_deref(),
+            Some("k3x9f2ab7qzm.pwamote.app")
+        );
+
+        // Le service passe aux noms `<id>.d.pwamote.app` : il l'annonce à la publication d'adresse.
+        let targets = w.targets.clone();
+        *w.dns.on_address.lock().unwrap() = Some(Box::new(move || {
+            *targets.registered.lock().unwrap() = Some("k3x9f2ab7qzm.d.pwamote.app".into());
+        }));
+        *w.ips.lock().unwrap() = vec!["192.168.1.21".parse().unwrap()];
+        let delay = w.m.tick(&auto).await;
+        assert!(
+            delay <= Duration::from_secs(1),
+            "nouveau passage sans attendre : {delay:?}"
+        );
+
+        w.m.tick(&auto).await;
+        let st = w.m.status();
+        assert_eq!(st.phase, PublicCertPhase::Active, "{st:?}");
+        assert_eq!(st.domain.as_deref(), Some("k3x9f2ab7qzm.d.pwamote.app"));
+        assert_eq!(
+            w.resolver
+                .active_domain(*w.clock.lock().unwrap())
+                .as_deref(),
+            Some("k3x9f2ab7qzm.d.pwamote.app")
+        );
+        assert_eq!(w.issuer.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(w.targets.registrations.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

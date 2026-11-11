@@ -304,6 +304,9 @@ pub(crate) mod testing {
         pub txt_history: Mutex<Vec<String>>,
         pub addresses: Mutex<Vec<Ipv4Addr>>,
         pub fail: std::sync::atomic::AtomicBool,
+        /// Appelé à chaque publication d'adresse (ex. le service renomme le PC).
+        #[allow(clippy::type_complexity)]
+        pub on_address: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     }
 
     impl FakeDns {
@@ -335,6 +338,9 @@ pub(crate) mod testing {
             Box::pin(async move {
                 self.check()?;
                 self.addresses.lock().unwrap().push(ip);
+                if let Some(hook) = self.on_address.lock().unwrap().as_ref() {
+                    hook();
+                }
                 Ok(())
             })
         }

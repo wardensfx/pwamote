@@ -1,9 +1,15 @@
 // Service DNS de PwaMote (Worker Cloudflare), sur le modèle de plex.direct.
 //
-// Chaque PC s'inscrit une fois et reçoit un nom `<id>.pwamote.app`. Il y publie
+// Chaque PC s'inscrit une fois et reçoit un nom `<id>.d.pwamote.app`. Il y publie
 // son adresse **locale** (réseau privé uniquement) et le défi DNS-01 de
 // Let's Encrypt ; le certificat lui-même est demandé par le PC, jamais ici.
 // Le service ne voit donc ni clé privée, ni trafic : seulement des enregistrements DNS.
+//
+// Les PC vivent sous `d.pwamote.app` et non directement sous `pwamote.app` : c'est
+// `d.pwamote.app` seul qui sera inscrit à la Public Suffix List (un site par PC), sans
+// toucher au site ni aux services (`pwamote.app`, `dns.`, `admin.`). Les PC inscrits
+// avant ce changement (`<id>.pwamote.app`) reçoivent le nouveau nom à leur prochaine
+// publication d'adresse, et l'ancien enregistrement est retiré.
 
 export interface Env {
   DEVICES: KVNamespace;
@@ -12,6 +18,8 @@ export interface Env {
   /** Facultatif : retrouvé par le nom de zone si absent. */
   ZONE_ID?: string;
   ZONE_NAME: string;
+  /** Suffixe des noms de PC, dans la zone. Par défaut `d.<zone>`. */
+  DEVICE_SUFFIX?: string;
 }
 
 type Device = { hash: string; created: number; seen: number };
@@ -115,6 +123,12 @@ async function removeAll(env: Env, type: string, name: string): Promise<void> {
   for (const r of await records(env, type, name)) await cf(env, "DELETE", `/dns_records/${r.id}`);
 }
 
+// ------------------------------------------------------------------ noms
+
+const deviceName = (env: Env, id: string) => `${id}.${env.DEVICE_SUFFIX || `d.${env.ZONE_NAME}`}`;
+/** Nom donné avant le passage à `d.` : à retirer. */
+const legacyName = (env: Env, id: string) => `${id}.${env.ZONE_NAME}`;
+
 // ------------------------------------------------------------------ requêtes
 
 const json = (data: unknown, status = 200) =>
@@ -143,7 +157,7 @@ async function register(req: Request, env: Env): Promise<Response> {
   const now = Date.now();
   const device: Device = { hash: await sha256(secret), created: now, seen: now };
   await env.DEVICES.put(`dev:${id}`, JSON.stringify(device));
-  return json({ id, secret, domain: `${id}.${env.ZONE_NAME}` }, 201);
+  return json({ id, secret, domain: deviceName(env, id) }, 201);
 }
 
 async function body(req: Request): Promise<Record<string, unknown> | null> {
@@ -162,7 +176,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
 
   const auth = await authenticate(req, env);
   if (!auth) return fail(401, "identifiants invalides");
-  const name = `${auth.id}.${env.ZONE_NAME}`;
+  const name = deviceName(env, auth.id);
   const touch = () => env.DEVICES.put(`dev:${auth.id}`, JSON.stringify({ ...auth.device, seen: Date.now() }));
 
   try {
@@ -170,6 +184,8 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const ip = (await body(req))?.ip;
       if (typeof ip !== "string" || !isPrivateIpv4(ip)) return fail(400, "seules les adresses d'un réseau privé sont acceptées");
       await upsert(env, "A", name, ip);
+      const legacy = legacyName(env, auth.id);
+      if (legacy !== name) await removeAll(env, "A", legacy);
       await touch();
       return json({ domain: name, ip });
     }
@@ -199,9 +215,11 @@ export async function sweep(env: Env, now = Date.now()): Promise<number> {
     for (const k of page.keys) {
       const d = await env.DEVICES.get<Device>(k.name, "json");
       if (d && now - d.seen > STALE_AFTER_DAYS * 86_400_000) {
-        const name = `${k.name.slice(4)}.${env.ZONE_NAME}`;
-        await removeAll(env, "A", name);
-        await removeAll(env, "TXT", `_acme-challenge.${name}`);
+        const id = k.name.slice(4);
+        for (const name of new Set([deviceName(env, id), legacyName(env, id)])) {
+          await removeAll(env, "A", name);
+          await removeAll(env, "TXT", `_acme-challenge.${name}`);
+        }
         await env.DEVICES.delete(k.name);
         removed++;
       }
