@@ -2,6 +2,9 @@ import { Match, Show, Switch, createResource, createSignal, type JSX } from "sol
 import type { RemoteController } from "../lib/remote";
 import { MAX_MESSAGE, canSend, emailOk, fetchReportInfo, phoneOs, reportLang, sendReport, withPhone } from "../lib/report";
 
+/** Adresse du support, pour quand le PC ne répond pas (le téléphone n'a pas d'accès direct au support). */
+const SUPPORT_MAIL = "support@pwamote.app";
+
 /** Repli si le PC ne répond pas : le modèle d'issue du dépôt public, sans rien de prérempli. */
 const GITHUB_FALLBACK = "https://github.com/wardensfx/pwamote/issues/new?template=bug.yml";
 
@@ -61,8 +64,17 @@ export function ReportSheet(props: { remote: RemoteController; onClose: () => vo
             <p class="note">Un instant…</p>
           </Match>
           <Match when={info.error}>
-            <p class="note">{String(info.error?.message ?? info.error)}</p>
-            <div class="row report-foot">{github("Signaler sur GitHub")}</div>
+            <p class="report-lead">{String(info.error?.message ?? info.error)}</p>
+            <p class="note">
+              Vous pouvez signaler le problème depuis l'application PwaMote sur le PC, ou écrire à{" "}
+              <a href={`mailto:${SUPPORT_MAIL}`}>{SUPPORT_MAIL}</a>.
+            </p>
+            <div class="row report-foot">
+              {github("Ouvrir GitHub")}
+              <button class="btn ghost small" onClick={props.onClose}>
+                Fermer
+              </button>
+            </div>
           </Match>
           <Match when={ticket()}>
             <div class="report-done">
