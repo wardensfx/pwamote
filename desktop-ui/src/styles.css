@@ -27,8 +27,10 @@ body {
   user-select: none;
   overflow-y: auto;
 }
-/* Mica actif : le fond devient transparent et laisse voir le bureau teinté. */
-body:has(main.backdrop) { background: transparent; }
+/* Mica actif : le fond laisse voir le bureau teinté, sous un voile sombre. Le voile garde
+   l'interface lisible quand Windows remplace Mica par un aplat (fenêtre inactive,
+   « Effets de transparence » coupés, économiseur de batterie). */
+body:has(main.backdrop) { background: rgba(13, 14, 18, 0.45); }
 body::before {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background:

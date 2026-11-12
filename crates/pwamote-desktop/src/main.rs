@@ -447,6 +447,8 @@ fn run_app() {
             tray.build(app)?;
 
             // Effet Mica de Windows 11 ; sur Windows 10 l'interface reste opaque.
+            // Mica sombre : le thème « Dark » de tauri.conf.json empêche tao de remettre
+            // la fenêtre en clair quand Windows est en thème clair (sinon Mica devient blanc).
             let mut backdrop = false;
             #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
