@@ -4,6 +4,7 @@ import type { ButtonView } from "../generated/ButtonView";
 import type { InputValue } from "../generated/InputValue";
 import { finalValues, formatStep, initialValues, isValid, RememberedValues, type Values } from "../lib/actions";
 import type { RemoteController } from "../lib/remote";
+import { Range } from "./Range";
 
 const remembered = new RememberedValues();
 const PAGE_KEY = "pwamote.deck-page";
@@ -149,7 +150,7 @@ function Field(props: { input: ActionInput; value: InputValue | undefined; onCha
               {k.unit ? ` ${k.unit}` : ""}
             </span>
           </div>
-          <input type="range" min={k.min} max={k.max} step={k.step} value={Number(props.value ?? k.default)} onInput={(e) => props.onChange(parseFloat(e.currentTarget.value))} />
+          <Range min={k.min} max={k.max} step={k.step} value={Number(props.value ?? k.default)} onChange={(v) => props.onChange(v)} />
         </div>
       );
     case "number":

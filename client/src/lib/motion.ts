@@ -1,10 +1,36 @@
 import { AxisCalibrator, IDENTITY_MAP, W3C_MAP, applyMap, type AxisMap } from "./axis-calibration";
 import type { MotionSample, Vec3 } from "./frames";
 
+type RawVec = { x: number | null; y: number | null; z: number | null };
+
 interface RawMotion {
   rotationRate: { alpha: number | null; beta: number | null; gamma: number | null } | null;
-  accelerationIncludingGravity: { x: number | null; y: number | null; z: number | null } | null;
+  accelerationIncludingGravity: RawVec | null;
+  /** Accélération sans la gravité, quand le navigateur la fournit (Android). */
+  acceleration?: RawVec | null;
+  /** Période d'échantillonnage du capteur. */
+  interval?: number | null;
 }
+
+/**
+ * Période du capteur en secondes, d'après `DeviceMotionEvent.interval`. La spécification
+ * l'exprime en millisecondes (Chrome) ; d'anciens Safari la donnaient en secondes.
+ * Une valeur absente ou hors des cadences plausibles (1 à 100 ms) donne `null`.
+ */
+export function sampleInterval(interval: number | null | undefined): number | null {
+  if (typeof interval !== "number" || !Number.isFinite(interval) || interval <= 0) return null;
+  const s = interval >= 1 ? interval / 1000 : interval;
+  return s >= 0.001 && s <= 0.1 ? s : null;
+}
+
+/**
+ * Source de mouvement à privilégier. Sur iPhone, les angles d'orientation sont précis et
+ * leurs axes sans ambiguïté. Sur Android, Chrome les calcule à partir d'angles d'Euler qui
+ * deviennent instables quand le téléphone est tenu droit vers l'écran, et livre les
+ * événements par paquets : la vitesse qu'on en déduit saute. Le gyroscope brut, lui,
+ * respecte l'ordre d'axes du W3C et donne directement une vitesse propre.
+ */
+export const preferredSource = (ios = isIOS()): "orientation" | "motion" => (ios ? "orientation" : "motion");
 
 export const isIOS = (ua = navigator.userAgent, platform = navigator.platform, touch = navigator.maxTouchPoints) =>
   /iPhone|iPad|iPod/.test(ua) || (platform === "MacIntel" && touch > 1);
@@ -52,6 +78,10 @@ export interface MotionDeps {
   initialMap?: AxisMap;
   /** Appelée quand la mesure établit l'affectation d'axes du capteur. */
   onCalibrated?: (map: AxisMap) => void;
+  /** L'affectation de départ est sûre (navigateur conforme au W3C) : pas de calibration. */
+  trustMap?: boolean;
+  /** Reçoit l'accélération sans gravité quand elle est activée avec `setLinear(true)`. */
+  onLinear?: (accel: Vec3, dt: number) => void;
 }
 
 const MAP_KEY = "pwamote.axismap";
@@ -89,6 +119,11 @@ export class MotionSource {
   private readonly calibrator = new AxisCalibrator();
   private readonly onCalibrated?: (map: AxisMap) => void;
   private count = 0;
+  private readonly onLinear?: (accel: Vec3, dt: number) => void;
+  private linear = false;
+  private readonly trusted: boolean;
+  /** Nombre d'événements portant une vitesse de rotation : permet de détecter un capteur muet. */
+  received = 0;
 
   constructor(
     private readonly onSample: (s: MotionSample) => void,
@@ -98,10 +133,17 @@ export class MotionSource {
     this.invertAccel = deps.invertAccel ?? isIOS();
     this.angle = deps.angle ?? (() => screen.orientation?.angle ?? 0);
     this.onCalibrated = deps.onCalibrated;
-    const saved = deps.initialMap ? null : loadAxisMap();
+    this.onLinear = deps.onLinear;
+    this.trusted = deps.trustMap ?? false;
+    const saved = deps.initialMap || this.trusted ? null : loadAxisMap();
     this.map = deps.initialMap ?? saved ?? defaultAxisMap();
-    // Une affectation déjà mesurée n'est plus remise en cause.
-    this.locked = saved !== null;
+    // Une affectation déjà mesurée (ou sûre) n'est plus remise en cause.
+    this.locked = saved !== null || this.trusted;
+  }
+
+  /** Active ou coupe l'envoi de l'accélération linéaire (option déplacements du téléphone). */
+  setLinear(enabled: boolean): void {
+    this.linear = enabled;
   }
 
   get axisMap(): AxisMap {
@@ -111,17 +153,23 @@ export class MotionSource {
   /** Oublie l'affectation mesurée : elle sera redéterminée au prochain mouvement. */
   resetCalibration(): void {
     saveAxisMap(null);
+    if (this.trusted) return;
     this.map = defaultAxisMap();
     this.locked = false;
     this.calibrator.reset();
   }
 
   handle(ev: RawMotion): void {
+    const r0 = ev.rotationRate;
+    if (r0 && (r0.alpha !== null || r0.beta !== null || r0.gamma !== null)) this.received++;
     const t = this.now();
     const prev = this.last;
     this.last = t;
-    if (prev === null) return;
-    const dt = (t - prev) / 1000;
+    // La cadence du capteur prime : les événements arrivent parfois groupés, et diviser par
+    // leur écart d'arrivée fausserait les vitesses (curseur saccadé qui se téléporte).
+    const period = sampleInterval(ev.interval);
+    if (period === null && prev === null) return;
+    const dt = period ?? (t - prev!) / 1000;
     if (dt <= 0) return;
     if (!this.locked) {
       const r = ev.rotationRate;
@@ -140,6 +188,11 @@ export class MotionSource {
     const s = normalizeSample(ev, dt, { invertAccel: this.invertAccel, map: this.map });
     const angle = this.angle();
     this.onSample({ ...s, gyro: rotateForOrientation(s.gyro, angle), accel: rotateForOrientation(s.accel, angle) });
+    const lin = ev.acceleration;
+    if (this.linear && this.onLinear && lin && lin.x !== null && lin.y !== null && lin.z !== null) {
+      const k = this.invertAccel ? -1 : 1;
+      this.onLinear(rotateForOrientation([k * lin.x, k * lin.y, k * lin.z], angle), dt);
+    }
   }
 
   start(): void {

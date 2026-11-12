@@ -367,7 +367,13 @@ flowchart LR
 
 ### Côté téléphone : d'où viennent ω et la gravité
 
-Les navigateurs ne s'accordent pas sur l'ordre des axes de `rotationRate`. Le client calcule donc ω à partir de `deviceorientation` (alpha, beta, gamma, définis sans ambiguïté par le W3C) : l'orientation devient un quaternion, et la rotation entre deux événements, exprimée dans le repère du téléphone, donne la vitesse angulaire. La gravité vient du même calcul, ce qui garantit qu'elle reste cohérente avec ω. `rotationRate` (avec calibration des axes) ne sert que de repli si aucun événement d'orientation n'arrive.
+La source dépend de la plateforme (`preferredSource` dans `client/src/lib/motion.ts`).
+
+**iPhone.** Safari n'annonce pas les axes de `rotationRate` dans l'ordre du W3C. Le client calcule donc ω à partir de `deviceorientation` (alpha, beta, gamma, définis sans ambiguïté) : l'orientation devient un quaternion, et la rotation entre deux événements, exprimée dans le repère du téléphone, donne la vitesse angulaire. La gravité vient du même calcul, ce qui garantit qu'elle reste cohérente avec ω.
+
+**Android.** Chrome calcule `deviceorientation` à partir d'angles d'Euler, instables quand le téléphone est tenu droit vers l'écran (blocage de cardan), et livre les événements par paquets : diviser un angle par l'écart d'arrivée donnait des vitesses fausses, que la zone morte, l'accélération et le filtre 1 € amplifiaient (curseur saccadé qui se téléporte). Le client y lit donc directement le gyroscope (`devicemotion.rotationRate`, ordre W3C respecté, sans calibration) et prend `dt` dans `event.interval`, la cadence du capteur, plutôt que dans l'heure d'arrivée. L'accélération sans gravité (`event.acceleration`) alimente l'option « déplacements du téléphone ».
+
+Chaque plateforme se replie sur l'autre méthode si sa source préférée reste muette 1,5 s.
 
 ```mermaid
 flowchart LR
@@ -377,8 +383,15 @@ flowchart LR
   Q --> U["Haut dans le repère du téléphone<br/>Ry(−γ)·Rx(−β)·ez"]
   W --> T["Trame de mouvement"]
   U --> T
-  R["devicemotion + calibration des axes"] -. "repli après 1,5 s sans orientation" .-> T
+  R["devicemotion.rotationRate<br/>dt = event.interval"] --> T
+  O -. "iPhone" .- Q
+  R -. "Android · repli réciproque après 1,5 s de silence" .- T
 ```
+
+### Côté téléphone : saisie et réglages
+
+- **Clavier.** Sur Android, Gboard « compose » chaque mot jusqu'à l'espace : le client envoie le champ à chaque modification (`TextSync`, `client/src/lib/text-sync.ts`) au lieu d'attendre la fin de composition comme sur iPhone, et Entrée envoie toujours le mot en cours avant la touche. Toucher la surface de pointage replie le clavier du téléphone mais garde le panneau et ses touches de contrôle ; les touches ne reprennent pas le focus.
+- **Curseurs.** Un curseur natif prend la valeur dès qu'on le touche sur Android, ce qui gênait le défilement des réglages. `Range` laisse le défilement vertical au navigateur (`touch-action: pan-y`) et ne règle la valeur que si le doigt part à l'horizontale (`SliderGesture`) ; un simple toucher ne change rien.
 
 ### Embrayage
 

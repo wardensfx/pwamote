@@ -51,6 +51,12 @@ function Problem(props: { remote: RemoteController }) {
   );
 }
 
+/** Replie le clavier du téléphone en retirant le focus du champ de saisie. */
+const foldPhoneKeyboard = () => {
+  const el = document.activeElement;
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) el.blur();
+};
+
 function Remote(props: { remote: RemoteController }) {
   const r = props.remote;
   // Un seul panneau à la fois entre la surface de pointage et les clics.
@@ -104,9 +110,10 @@ function Remote(props: { remote: RemoteController }) {
         </button>
       </div>
 
-      {/* Toucher la surface ferme le clavier (et celui de l'iPhone), pas le panneau d'actions : on vise puis on appuie. */}
+      {/* Toucher la surface replie le clavier du téléphone pour mieux voir l'écran, mais garde le panneau
+          et ses touches de contrôle : on le ferme avec le bouton Clavier, on rouvre la saisie en touchant le champ. */}
       <Show when={!stuck()} fallback={<Recovery remote={r} />}>
-        <Pad remote={r} onTouch={() => panel() === "keyboard" && setPanel(null)} />
+        <Pad remote={r} onTouch={foldPhoneKeyboard} />
       </Show>
 
       <Show when={panel() === "keyboard"}>

@@ -13,7 +13,9 @@ import { encodeLinear, encodeMotion, encodeScroll, encodeTrackpad } from "./fram
 import { haptic } from "./haptics";
 import { clearIdentity, guessDeviceName, loadIdentity, saveIdentity, wsUrl, type Identity } from "./identity";
 import { StickyModifiers } from "./modifiers";
-import { MotionSource, requestMotionPermission, saveAxisMap, type MotionPermission } from "./motion";
+import { W3C_MAP } from "./axis-calibration";
+import type { Vec3 } from "./frames";
+import { MotionSource, preferredSource, requestMotionPermission, saveAxisMap, type MotionPermission } from "./motion";
 import { OrientationSource } from "./orientation";
 import { SettingsSync, type Edit } from "./settings-sync";
 import type { Values } from "./actions";
@@ -56,8 +58,15 @@ export class RemoteController {
   private sync = new SettingsSync((s) => {
     this.settingsSig[1](s);
     this.modifiers.setSticky(s.keyboard.sticky_modifiers);
-    this.orientation?.setLinear(s.pointer.translation && this.orientation.received > 0);
+    this.applyLinear();
   });
+
+  /** Option « déplacements du téléphone » : seulement sur la source qui reçoit des mesures. */
+  private applyLinear(): void {
+    const on = this.settings()?.pointer.translation ?? false;
+    this.orientation?.setLinear(on && this.orientation.received > 0);
+    this.motion?.setLinear(on && this.motion.received > 0);
+  }
 
   readonly phase = () => this.phaseSig[0]();
   readonly settings = () => this.settingsSig[0]();
@@ -309,22 +318,28 @@ export class RemoteController {
     this.motionSig[1](permission);
     if (permission === "granted") {
       const send = (s: Parameters<typeof encodeMotion>[0]) => this.conn?.sendBinary(encodeMotion(s));
-      // Méthode privilégiée : angles d'orientation, aux axes définis sans ambiguïté.
-      this.orientation ??= new OrientationSource(send, {
-        onLinear: (accel, dt) => this.conn?.sendBinary(encodeLinear(accel, dt)),
-      });
-      this.motion ??= new MotionSource(send);
-      this.orientation.start();
-      // Navigateur sans `deviceorientation` : repli sur le gyroscope brut avec calibration des axes.
+      const linear = (accel: Vec3, dt: number) => this.conn?.sendBinary(encodeLinear(accel, dt));
+      this.orientation ??= new OrientationSource(send, { onLinear: linear });
+      const preferred = preferredSource();
+      // Sur Android, Chrome suit l'ordre d'axes du W3C : inutile (et risqué) de le recalibrer.
+      this.motion ??= preferred === "motion" ? new MotionSource(send, { initialMap: W3C_MAP, trustMap: true, onLinear: linear }) : new MotionSource(send);
+      this.motion.received = 0;
+      this.orientation.received = 0;
+      if (preferred === "motion") this.motion.start();
+      else this.orientation.start();
+      // Capteur préféré muet : repli sur l'autre méthode.
       if (this.fallbackTimer) clearTimeout(this.fallbackTimer);
       this.fallbackTimer = setTimeout(() => {
         this.fallbackTimer = null;
-        if (this.orientation && this.orientation.received === 0) {
+        if (!this.motion || !this.orientation) return;
+        if (preferred === "orientation" && this.orientation.received === 0) {
           this.orientation.stop();
-          this.motion?.start();
-        } else {
-          this.orientation?.setLinear(this.settings()?.pointer.translation ?? false);
+          this.motion.start();
+        } else if (preferred === "motion" && this.motion.received === 0) {
+          this.motion.stop();
+          this.orientation.start();
         }
+        this.applyLinear();
       }, 1500);
     }
     return permission;
@@ -342,6 +357,7 @@ export class RemoteController {
     this.orientation?.stop();
     this.motion?.stop();
     if (this.orientation) this.orientation.received = 0;
+    if (this.motion) this.motion.received = 0;
     if (this.motionSig[0]() === "granted") this.motionSig[1]("off");
     this.clutchSig[1](false);
   }

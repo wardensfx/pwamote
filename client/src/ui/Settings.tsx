@@ -4,6 +4,7 @@ import type { PointerMode } from "../generated/PointerMode";
 import type { Settings } from "../generated/Settings";
 import type { RemoteController } from "../lib/remote";
 import { forceUpdate } from "../lib/update";
+import { Range } from "./Range";
 import { useScanner } from "./Recovery";
 import { ReportSheet } from "./Report";
 
@@ -28,7 +29,7 @@ function Slider(props: { label: string; value: number; min: number; max: number;
         <span class="lbl">{props.label}</span>
         <span class="val">{(props.format ?? ((v) => String(v)))(props.value)}</span>
       </div>
-      <input type="range" min={props.min} max={props.max} step={props.step} value={props.value} onInput={(e) => props.onChange(parseFloat(e.currentTarget.value))} />
+      <Range min={props.min} max={props.max} step={props.step} value={props.value} onChange={props.onChange} />
     </div>
   );
 }
