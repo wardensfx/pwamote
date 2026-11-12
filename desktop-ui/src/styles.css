@@ -343,7 +343,9 @@ details.advanced[open] > summary::before { transform: rotate(90deg); }
 .options .field-label:first-of-type { margin-top: 4px; }
 
 /* ---------- Signaler un problème ---------- */
-.footer-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.footer-path { min-width: 0; overflow-wrap: anywhere; }
+.footer-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
+.footer-row > span { min-width: 0; flex: 1 1 14em; }
 .report-open {
   flex: none; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 999px;
   border: 1px solid var(--edge); background: var(--glass); color: var(--ink-dim); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;

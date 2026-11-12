@@ -364,13 +364,13 @@ export function App(props: { backend: Backend }) {
             </div>
 
             <footer>
+              <span class="footer-path">Données : <span class="mono">{dataDir()}</span></span>
               <div class="footer-row">
-                <span>Données : <span class="mono">{dataDir()}</span></span>
+                <span>Clic droit sur l'icône de la barre système pour quitter.</span>
                 <button class="report-open" onClick={() => setReporting(true)}>
                   <i aria-hidden="true">⚑</i> Signaler un problème
                 </button>
               </div>
-              <span>Clic droit sur l'icône de la barre système pour quitter.</span>
             </footer>
             <Show when={reporting()}>
               <ReportDialog backend={be} onClose={() => setReporting(false)} />
