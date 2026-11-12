@@ -6,9 +6,17 @@ name: Release
 # publiée sans fichiers ne peut plus être complétée et son tag ne peut plus resservir.
 # La CI complète tourne avec la version injectée, puis la release GitHub est créée avec
 # l'installeur, le serveur seul, leurs empreintes SHA-256 et le changelog depuis le tag précédent.
+# Sans accès à git (depuis un téléphone) : onglet Actions › Release › Run workflow, en saisissant
+# le tag. Le workflow crée alors le tag sur la tête de la branche choisie, puis publie pareil.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag à créer sur cette branche puis à publier (ex. v1.3.6)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -16,6 +24,8 @@ permissions:
 jobs:
   version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.v.outputs.version }}
       prerelease: ${{ steps.v.outputs.prerelease }}
@@ -24,9 +34,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Créer le tag (lancement manuel)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Tag invalide : « $TAG » (attendu : v1.2.3 ou v1.2.3-beta.1)."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Le tag $TAG existe déjà : choisir une version plus récente."
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$GITHUB_SHA" >/dev/null
+          echo "Tag $TAG créé sur $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
       - id: v
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           version="$(node scripts/set-version.mjs --print "$TAG")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -47,7 +73,7 @@ jobs:
     permissions:
       contents: write
     env:
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ inputs.tag || github.ref_name }}
       VERSION: ${{ needs.version.outputs.version }}
       PRERELEASE: ${{ needs.version.outputs.prerelease }}
       GH_TOKEN: ${{ github.token }}
