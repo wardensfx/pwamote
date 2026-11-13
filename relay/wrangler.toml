@@ -20,3 +20,7 @@ binding = "DEVICES"
 # Ménage hebdomadaire des PC disparus depuis plus de 180 jours.
 [triggers]
 crons = ["17 3 * * 1"]
+
+# Aucun journal de requêtes stocké (politique de confidentialité). `wrangler tail` reste possible en direct.
+[observability]
+enabled = false
