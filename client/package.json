@@ -23,5 +23,10 @@
   "dependencies": {
     "jsqr": "^1.4.0",
     "solid-js": "^1.9.18"
+  },
+  "overrides": {
+    "workbox-build": {
+      "glob": "^14.0.6"
+    }
   }
 }
