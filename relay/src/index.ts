@@ -201,7 +201,9 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       return json({ ok: true });
     }
   } catch (e) {
-    return fail(502, String(e instanceof Error ? e.message : e));
+    // Le détail (réponse de l'API Cloudflare) reste dans les journaux, pas dans la réponse.
+    console.error(e);
+    return fail(502, "le service DNS n'a pas pu traiter la demande, réessaie plus tard");
   }
   return fail(404, "inconnu");
 }

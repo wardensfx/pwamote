@@ -29,6 +29,10 @@ env:
   # comme avant. Mise en place : docs/signature-windows.md.
   SIGN_ENABLED: ${{ inputs.version != '' && vars.AZURE_SIGNING_ACCOUNT != '' }}
 
+# Lecture seule pour tous les jobs : aucun n'écrit dans le dépôt.
+permissions:
+  contents: read
+
 jobs:
   client:
     runs-on: ubuntu-latest

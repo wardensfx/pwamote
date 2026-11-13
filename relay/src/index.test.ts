@@ -125,6 +125,18 @@ describe("adresse et défi", () => {
     expect((await call("DELETE", "/v1/challenge", { auth: d.auth })).status).toBe(200);
     expect(cf.recs).toHaveLength(0);
   });
+  it("une erreur de l'API Cloudflare ne fuit pas dans la réponse", async () => {
+    const d = await registered();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    cf.fetch.mockImplementation(async () =>
+      new Response(JSON.stringify({ success: false, errors: [{ message: "jeton zone1 invalide", code: 10000 }] })),
+    );
+    const rsp = await call("PUT", "/v1/address", { auth: d.auth, body: { ip: "192.168.1.20" } });
+    expect(rsp.status).toBe(502);
+    const text = await rsp.text();
+    expect(text).not.toContain("jeton");
+    expect(text).not.toContain("Cloudflare");
+  });
   it("un PC ne peut toucher qu'à son propre nom", async () => {
     const a = await registered();
     const b = await registered();
