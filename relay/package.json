@@ -1,6 +1,7 @@
 {
   "name": "pwamote-relay",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "description": "Service DNS de PwaMote : un nom <id>.pwamote.app par PC, pointant vers son IP locale, et le défi DNS-01 de Let's Encrypt.",
   "scripts": {

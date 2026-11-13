@@ -94,3 +94,11 @@ Trunk-based development : commits directs sur `main`, CI verte obligatoire (`fmt
 | Actions : lancement de programmes, ouverture (`ShellExecuteW`), touches avec code de balayage | écrit, compilé pour Windows, à valider sur Windows |
 | Gyro continu : la surface centrale fait clic gauche, appui maintenu et molette | fait, testé, vérifié dans un navigateur émulant un iPhone |
 | Image collée dans le champ du clavier → collée sur le PC (presse-papiers + Ctrl+V), route `/paste` | fait, testé de bout en bout ; presse-papiers validé par Yann sur iPhone + Windows, Ctrl+V automatique à valider |
+
+## Licence
+
+PwaMote (application, télécommande et service DNS `relay/`) est distribué sous licence
+[GNU AGPL v3 ou ultérieure](LICENSE) (`AGPL-3.0-or-later`). Vous pouvez l'utiliser, l'étudier,
+le modifier et le redistribuer ; toute version modifiée que vous distribuez, ou que vous
+proposez comme service sur un réseau (un relay, par exemple), doit publier son code source
+sous la même licence.
