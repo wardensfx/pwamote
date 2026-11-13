@@ -60,6 +60,7 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 .brand svg { width: 34px; height: 34px; color: var(--ink); }
 .machine { color: var(--ink-faint); font-size: 12.5px; margin-top: 2px; }
 .title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.licence { color: var(--ink-dim); font-size: 11.5px; letter-spacing: 0.01em; transform: translateY(2px); cursor: default; }
 .version { color: var(--ink-faint); font-size: 11.5px; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; transform: translateY(2px); cursor: default; }
 
 /* Pastille « Mise à jour » : verre teinté d'ambre, point lumineux qui respire doucement. */

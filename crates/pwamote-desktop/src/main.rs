@@ -4,9 +4,11 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use pwamote_server::cli::{self, Launch};
 use pwamote_server::config::AppConfig;
+use pwamote_server::licence::{self, LicenceInfo};
 use pwamote_server::pwamote_core::actions::Deck;
 use pwamote_server::report::{ReportInfo, ReportReceipt, ReportRequest};
 use pwamote_server::supervisor::{DeviceView, PairingInfo, ServerStatus, Supervisor};
@@ -18,6 +20,7 @@ use tauri::menu::{
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent, Wry};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tokio::sync::Notify;
 
 /// Événement envoyé à la fenêtre quand l'état du serveur change hors de ses propres commandes
 /// (par exemple depuis le menu de la barre système).
@@ -25,6 +28,15 @@ const STATUS_EVENT: &str = "status-changed";
 
 /// Événement envoyé quand une nouvelle version vient d'être trouvée.
 const UPDATE_EVENT: &str = "update-changed";
+
+/// Événement envoyé quand l'état de la licence change.
+const LICENCE_EVENT: &str = "licence-changed";
+
+/// Fenêtre ouverte : mises à jour et licence sont revérifiées toutes les 5 minutes.
+const ACTIVE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// Deux vérifications ne se suivent jamais de plus près (ouvertures et focus répétés).
+const MIN_GAP: Duration = Duration::from_secs(30);
 
 struct Ctx {
     supervisor: Arc<Supervisor>,
@@ -38,6 +50,10 @@ struct Ctx {
     update: Mutex<UpdateInfo>,
     /// Ligne du menu : la version, ou la mise à jour disponible.
     tray_version: MenuItem<Wry>,
+    /// Dernière licence connue (rien en mode ouvert ou hors service).
+    licence: Mutex<Option<LicenceInfo>>,
+    /// Réveille la boucle de vérification : fenêtre ouverte ou refocalisée.
+    refresh: Arc<Notify>,
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -45,6 +61,9 @@ fn show_main_window(app: &AppHandle) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+    }
+    if let Some(ctx) = app.try_state::<Ctx>() {
+        ctx.refresh.notify_one();
     }
 }
 
@@ -146,6 +165,11 @@ fn data_dir_path(ctx: State<'_, Ctx>) -> String {
 }
 
 #[tauri::command]
+fn get_licence_info(ctx: State<'_, Ctx>) -> Option<LicenceInfo> {
+    ctx.licence.lock().unwrap().clone()
+}
+
+#[tauri::command]
 fn get_update_info(ctx: State<'_, Ctx>) -> UpdateInfo {
     ctx.update.lock().unwrap().clone()
 }
@@ -205,42 +229,86 @@ async fn open_issue(ctx: State<'_, Ctx>) -> Result<(), String> {
     }
 }
 
-/// Vérifie les mises à jour au lancement puis régulièrement. Uniquement pour les binaires
-/// de la CI : une compilation locale ne contacte jamais GitHub.
-fn watch_updates(app: AppHandle) {
-    let Some(repo) = update::release_repo() else {
-        tracing::info!("compilation locale : pas de vérification des mises à jour");
-        return;
-    };
+/// Vérifie mises à jour et licence au lancement, à chaque retour de la fenêtre au premier plan
+/// (y compris depuis la barre système : l'utilisateur s'en sert), toutes les 5 minutes tant
+/// qu'elle est visible, et toutes les 6 heures sinon.
+fn watch_refresh(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        let http = pwamote_server::public_cert::dns::http_client();
+        let refresh = app.state::<Ctx>().refresh.clone();
         // Laisse le serveur démarrer avant d'aller sur le réseau.
-        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+        tokio::time::sleep(Duration::from_secs(10)).await;
         loop {
-            match update::check(&http, update::GITHUB_API, repo, update::CURRENT_VERSION).await {
-                Ok(found) => {
-                    let ctx = app.state::<Ctx>();
-                    let info = UpdateInfo::new(found);
-                    let changed = {
-                        let mut cur = ctx.update.lock().unwrap();
-                        let changed = *cur != info;
-                        *cur = info.clone();
-                        changed
-                    };
-                    if changed {
-                        if let Some(r) = &info.available {
-                            tracing::info!(version = %r.version, "mise à jour disponible");
-                        }
-                        sync_tray_update(&ctx, &info);
-                        let _ = app.emit(UPDATE_EVENT, info);
-                    }
+            let started = Instant::now();
+            check_update(&app).await;
+            check_licence(&app).await;
+            let wait = if window_active(&app) {
+                ACTIVE_INTERVAL
+            } else {
+                update::CHECK_INTERVAL
+            };
+            tokio::select! {
+                _ = tokio::time::sleep(wait) => {}
+                _ = refresh.notified() => {
+                    tokio::time::sleep(MIN_GAP.saturating_sub(started.elapsed())).await;
                 }
-                // Hors ligne ou limite de l'API atteinte : on retentera plus tard.
-                Err(e) => tracing::debug!(error = %e, "vérification des mises à jour"),
             }
-            tokio::time::sleep(update::CHECK_INTERVAL).await;
         }
     });
+}
+
+/// Fenêtre visible et non réduite.
+fn window_active(app: &AppHandle) -> bool {
+    app.get_webview_window("main")
+        .is_some_and(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false))
+}
+
+/// Uniquement pour les binaires de la CI : une compilation locale ne contacte jamais GitHub.
+async fn check_update(app: &AppHandle) {
+    let http = pwamote_server::public_cert::dns::http_client();
+    let Some(repo) = update::release_repo() else {
+        return;
+    };
+    match update::check(&http, update::GITHUB_API, repo, update::CURRENT_VERSION).await {
+        Ok(found) => {
+            let ctx = app.state::<Ctx>();
+            let info = UpdateInfo::new(found);
+            let changed = {
+                let mut cur = ctx.update.lock().unwrap();
+                let changed = *cur != info;
+                *cur = info.clone();
+                changed
+            };
+            if changed {
+                if let Some(r) = &info.available {
+                    tracing::info!(version = %r.version, "mise à jour disponible");
+                }
+                sync_tray_update(&ctx, &info);
+                let _ = app.emit(UPDATE_EVENT, info);
+            }
+        }
+        // Hors ligne ou limite de l'API atteinte : on retentera plus tard.
+        Err(e) => tracing::debug!(error = %e, "vérification des mises à jour"),
+    }
+}
+
+/// Un échec garde l'affichage précédent : la licence n'est jamais un obstacle.
+async fn check_licence(app: &AppHandle) {
+    let http = pwamote_server::public_cert::dns::http_client();
+    let ctx = app.state::<Ctx>();
+    match licence::fetch(&http, &pwamote_server::report::support_url(), &ctx.data_dir).await {
+        Ok(info) => {
+            let changed = {
+                let mut cur = ctx.licence.lock().unwrap();
+                let changed = *cur != info;
+                *cur = info.clone();
+                changed
+            };
+            if changed {
+                let _ = app.emit(LICENCE_EVENT, info);
+            }
+        }
+        Err(e) => tracing::debug!(error = %e, "vérification de la licence"),
+    }
 }
 
 /// Ajoute « Mise à jour disponible » au menu de la barre système.
@@ -380,6 +448,7 @@ fn run_app() {
             has_backdrop,
             data_dir_path,
             get_update_info,
+            get_licence_info,
             open_release,
             report_info,
             send_report,
@@ -463,8 +532,10 @@ fn run_app() {
                 tray_toggle: toggle,
                 update: Mutex::new(update_info),
                 tray_version: version,
+                licence: Mutex::new(None),
+                refresh: Arc::new(Notify::new()),
             });
-            watch_updates(handle.clone());
+            watch_refresh(handle.clone());
 
             // Le lancement au démarrage de Windows suit toujours la configuration enregistrée.
             if config.launch_at_login != handle.autolaunch().is_enabled().unwrap_or(false) {
@@ -500,6 +571,11 @@ fn run_app() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let WindowEvent::Focused(true) = event {
+                if let Some(ctx) = window.app_handle().try_state::<Ctx>() {
+                    ctx.refresh.notify_one();
+                }
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let to_tray = window
                     .app_handle()

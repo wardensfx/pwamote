@@ -3,12 +3,13 @@ import type { Deck } from "../../client/src/generated/Deck";
 import type { DeviceView } from "../../client/src/generated/DeviceView";
 import type { PairingInfo } from "../../client/src/generated/PairingInfo";
 import type { ServerStatus } from "../../client/src/generated/ServerStatus";
+import type { LicenceInfo } from "../../client/src/generated/LicenceInfo";
 import type { UpdateInfo } from "../../client/src/generated/UpdateInfo";
 import type { ReportInfo } from "../../client/src/generated/ReportInfo";
 import type { ReportReceipt } from "../../client/src/generated/ReportReceipt";
 import type { ReportRequest } from "../../client/src/generated/ReportRequest";
 
-export type { AppConfig, Deck, DeviceView, PairingInfo, ReportInfo, ReportReceipt, ReportRequest, ServerStatus, UpdateInfo };
+export type { AppConfig, Deck, DeviceView, LicenceInfo, PairingInfo, ReportInfo, ReportReceipt, ReportRequest, ServerStatus, UpdateInfo };
 
 export interface Backend {
   getStatus(): Promise<ServerStatus>;
@@ -30,6 +31,9 @@ export interface Backend {
   /** Ouvre la page de la nouvelle version dans le navigateur. */
   openRelease(): Promise<void>;
   onUpdateChanged(cb: (u: UpdateInfo) => void): Promise<() => void>;
+  /** Offre de ce PC, ou null en mode ouvert / hors service pwamote.app. */
+  getLicenceInfo(): Promise<LicenceInfo | null>;
+  onLicenceChanged(cb: (l: LicenceInfo | null) => void): Promise<() => void>;
   /** Canal de signalement : support PwaMote (PC inscrit à pwamote.app) ou GitHub. */
   reportInfo(): Promise<ReportInfo | null>;
   /** Envoie le signalement au support PwaMote ; renvoie la référence du ticket. */
@@ -59,6 +63,8 @@ async function tauriBackend(): Promise<Backend> {
     getUpdateInfo: () => invoke("get_update_info"),
     openRelease: () => invoke("open_release"),
     onUpdateChanged: (cb) => listen<UpdateInfo>("update-changed", (e) => cb(e.payload)),
+    getLicenceInfo: () => invoke("get_licence_info"),
+    onLicenceChanged: (cb) => listen<LicenceInfo | null>("licence-changed", (e) => cb(e.payload)),
     reportInfo: () => invoke("report_info"),
     sendReport: (request) => invoke("send_report", { request }),
     openIssue: () => invoke("open_issue"),

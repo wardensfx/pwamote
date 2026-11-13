@@ -1,3 +1,4 @@
+import type { LicenceInfo } from "../../client/src/generated/LicenceInfo";
 import type { UpdateInfo } from "../../client/src/generated/UpdateInfo";
 
 /** Numéro discret affiché à côté du titre. */
@@ -15,4 +16,15 @@ export function versionHint(info: UpdateInfo): string {
 /** Texte de la pastille de mise à jour, ou `null` s'il n'y a rien à proposer. */
 export function updateLabel(info: UpdateInfo): string | null {
   return info.official && info.available ? `Mise à jour ${info.available.version}` : null;
+}
+
+/** Pastille discrète de l'offre : « Plus · jusqu'au 12/12 », ou le nom seul sans échéance. */
+export function licenceLabel(info: LicenceInfo): string {
+  if (!info.licensed || info.expires == null) return info.plan;
+  return `${info.plan} · jusqu'au ${new Date(info.expires).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}`;
+}
+
+/** Info-bulle de l'offre. */
+export function licenceHint(info: LicenceInfo): string {
+  return info.licensed ? `Offre ${info.plan}, licence active.` : `Offre ${info.plan} (aucune licence active sur ce PC).`;
 }

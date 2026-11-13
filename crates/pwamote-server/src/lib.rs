@@ -6,6 +6,7 @@ pub mod config;
 pub mod firewall;
 pub mod headless;
 pub mod input;
+pub mod licence;
 pub mod logging;
 pub mod mdns;
 pub mod net;

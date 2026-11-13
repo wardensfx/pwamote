@@ -148,6 +148,13 @@ export function mockBackend(): Backend {
     },
     openRelease: async () => void window.open("https://github.com/wardensfx/pwamote/releases/tag/v1.3.0", "_blank"),
     onUpdateChanged: async () => () => {},
+    // ?licence=plus simule une licence active, ?licence=free l'offre gratuite ; sinon rien (mode ouvert).
+    getLicenceInfo: async () => {
+      const l = new URLSearchParams(location.search).get("licence");
+      if (l === "plus") return { plan: "Plus", licensed: true, expires: Date.now() + 20 * 86_400_000 };
+      return l === "free" ? { plan: "Casual", licensed: false, expires: null } : null;
+    },
+    onLicenceChanged: async () => () => {},
     // ?report=github simule un PC hors du service pwamote.app, ?report=fail un envoi refusé.
     reportInfo: async () => {
       const github = new URLSearchParams(location.search).get("report") === "github";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UpdateInfo } from "../../client/src/generated/UpdateInfo";
-import { updateLabel, versionHint, versionText } from "./version";
+import { licenceHint, licenceLabel, updateLabel, versionHint, versionText } from "./version";
 
 const info = (over: Partial<UpdateInfo> = {}): UpdateInfo => ({ current: "1.2.0", official: true, available: null, ...over });
 const release = { version: "1.3.0", url: "https://github.com/wardensfx/pwamote/releases/tag/v1.3.0" };
@@ -35,5 +35,19 @@ describe("updateLabel", () => {
   });
   it("jamais pour une compilation locale", () => {
     expect(updateLabel(info({ official: false, available: release }))).toBeNull();
+  });
+});
+
+describe("licenceLabel", () => {
+  it("nom seul sans licence ou sans échéance", () => {
+    expect(licenceLabel({ plan: "Casual", licensed: false, expires: null })).toBe("Casual");
+    expect(licenceLabel({ plan: "Plus", licensed: true, expires: null })).toBe("Plus");
+  });
+  it("ajoute l'échéance d'une licence", () => {
+    expect(licenceLabel({ plan: "Plus", licensed: true, expires: Date.UTC(2026, 11, 12, 12) })).toBe("Plus · jusqu'au 12/12");
+  });
+  it("info-bulle selon la licence", () => {
+    expect(licenceHint({ plan: "Plus", licensed: true, expires: null })).toMatch(/active/);
+    expect(licenceHint({ plan: "Casual", licensed: false, expires: null })).toMatch(/aucune licence/);
   });
 });

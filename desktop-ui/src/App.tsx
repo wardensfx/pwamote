@@ -3,8 +3,8 @@ import { DeckEditor } from "./DeckEditor";
 import { PublicCertCard } from "./PublicCert";
 import { ReportDialog } from "./Report";
 import { countdown, isValidHost, phonesLabel, relativeTime, selectedAddress } from "./format";
-import type { AppConfig, Backend, DeviceView, PairingInfo, ServerStatus, UpdateInfo } from "./ipc";
-import { updateLabel, versionHint, versionText } from "./version";
+import type { AppConfig, Backend, DeviceView, LicenceInfo, PairingInfo, ServerStatus, UpdateInfo } from "./ipc";
+import { licenceHint, licenceLabel, updateLabel, versionHint, versionText } from "./version";
 
 /** Durée de validité d'un code d'appairage, en secondes (voir pwamote-core). */
 const CODE_TTL = 300;
@@ -48,6 +48,7 @@ export function App(props: { backend: Backend }) {
   const [tab, setTab] = createSignal<"connection" | "actions">("connection");
   const [deckDirty, setDeckDirty] = createSignal(false);
   const [update, setUpdate] = createSignal<UpdateInfo | null>(null);
+  const [licence, setLicence] = createSignal<LicenceInfo | null>(null);
   const [reporting, setReporting] = createSignal(false);
   // Ne remplace l'état que s'il a vraiment changé : sinon la liste d'adresses et le QR se redessinent
   // à chaque interrogation périodique.
@@ -85,6 +86,8 @@ export function App(props: { backend: Backend }) {
     setUpdate(await be.getUpdateInfo());
     const unlistenUpdate = await be.onUpdateChanged(setUpdate);
     onCleanup(unlistenUpdate);
+    setLicence(await be.getLicenceInfo());
+    onCleanup(await be.onLicenceChanged(setLicence));
     const unlisten = await be.onStatusChanged(updateStatus);
     const poll = setInterval(async () => {
       updateStatus(await be.getStatus());
@@ -158,6 +161,13 @@ export function App(props: { backend: Backend }) {
                           <span class="version" title={versionHint(u())}>
                             {versionText(u())}
                           </span>
+                          <Show when={licence()}>
+                            {(l) => (
+                              <span class="licence" title={licenceHint(l())}>
+                                {licenceLabel(l())}
+                              </span>
+                            )}
+                          </Show>
                           <Show when={updateLabel(u())}>
                             {(label) => (
                               <button class="update-chip" title={versionHint(u())} onClick={() => void be.openRelease()}>
