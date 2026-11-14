@@ -537,9 +537,13 @@ fn run_app() {
             });
             watch_refresh(handle.clone());
 
-            // Le lancement au démarrage de Windows suit toujours la configuration enregistrée.
-            if config.launch_at_login != handle.autolaunch().is_enabled().unwrap_or(false) {
-                apply_launch_at_login(&handle, config.launch_at_login);
+            // Le lancement au démarrage de Windows suit toujours la configuration enregistrée,
+            // et pointe toujours vers cet exécutable (l'édition portable change de nom).
+            if let Some(enable) = pwamote_server::startup::launch_at_login_action(
+                config.launch_at_login,
+                handle.autolaunch().is_enabled().unwrap_or(false),
+            ) {
+                apply_launch_at_login(&handle, enable);
             }
 
             if !config.start_minimized {

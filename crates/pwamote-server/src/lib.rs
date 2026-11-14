@@ -14,6 +14,7 @@ pub mod platform;
 pub mod public_cert;
 pub mod report;
 pub mod session;
+pub mod startup;
 pub mod state;
 pub mod supervisor;
 pub mod tls;

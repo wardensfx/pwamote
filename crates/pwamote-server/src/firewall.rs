@@ -22,13 +22,17 @@ fn ps_quote(s: &str) -> String {
 /// Script qui retire les règles existantes de cet exécutable (y compris un blocage créé quand la
 /// fenêtre de Windows a été fermée) et en crée une qui n'accepte que le sous-réseau local
 /// (tous protocoles : HTTPS en TCP, mDNS en UDP).
+///
+/// Les règles PwaMote d'**autres** exécutables restent en place tant que leur fichier existe :
+/// l'édition portable change de nom à chaque version, et supprimer la règle de l'autre copie
+/// lui faisait redemander l'administrateur à son prochain lancement (au démarrage du PC).
 pub fn firewall_script(exe: &str) -> String {
     let exe = ps_quote(exe);
     let name = ps_quote(RULE_NAME);
     format!(
         "$ErrorActionPreference = 'Stop'; \
          Get-NetFirewallApplicationFilter -Program {exe} -ErrorAction SilentlyContinue | Get-NetFirewallRule -ErrorAction SilentlyContinue | Remove-NetFirewallRule; \
-         Get-NetFirewallRule -DisplayName {name} -ErrorAction SilentlyContinue | Remove-NetFirewallRule; \
+         Get-NetFirewallRule -DisplayName {name} -ErrorAction SilentlyContinue | Where-Object {{ $p = ($_ | Get-NetFirewallApplicationFilter).Program; -not $p -or -not (Test-Path -LiteralPath $p) }} | Remove-NetFirewallRule; \
          New-NetFirewallRule -DisplayName {name} -Direction Inbound -Action Allow -Program {exe} -Protocol Any -RemoteAddress LocalSubnet -Profile Any | Out-Null"
     )
 }
@@ -55,11 +59,17 @@ pub enum RuleState {
 
 /// Script de lecture seule (sans élévation) : les règles de cet exécutable et celle de PwaMote,
 /// en JSON. La décision se prend côté Rust (`decide`), où elle est testée.
+///
+/// Au démarrage du PC, le service du pare-feu peut ne pas encore répondre : les lectures
+/// échouaient en silence, la liste vide passait pour « aucune règle » et PwaMote demandait
+/// l'administrateur à chaque démarrage. Le script vérifie donc d'abord que le pare-feu répond,
+/// sinon il écrit un message non JSON (→ `Unknown`, on ne demande rien).
 pub fn check_script(exe: &str) -> String {
     let exe = ps_quote(exe);
     let name = ps_quote(RULE_NAME);
     format!(
         "$ErrorActionPreference = 'SilentlyContinue'; [Console]::OutputEncoding = [Text.Encoding]::UTF8; \
+         if ((Get-Service -Name MpsSvc).Status -ne 'Running' -or -not (Get-NetFirewallProfile)) {{ 'PARE-FEU INDISPONIBLE'; exit 1 }}; \
          $rules = @(Get-NetFirewallApplicationFilter -Program {exe} | Get-NetFirewallRule) + @(Get-NetFirewallRule -DisplayName {name}); \
          $items = @($rules | Where-Object {{ $_ }} | ForEach-Object {{ \
            [pscustomobject]@{{ action = \"$($_.Action)\"; enabled = \"$($_.Enabled)\"; direction = \"$($_.Direction)\"; \
@@ -107,7 +117,8 @@ pub fn decide(rules: &[RuleInfo], exe: &str) -> RuleState {
 pub fn parse_state(output: &str, exe: &str) -> RuleState {
     let json = output.trim();
     let rules: Result<Vec<RuleInfo>, _> = if json.is_empty() {
-        Ok(Vec::new())
+        // PowerShell n'a rien écrit (le script sort toujours au moins `[]`) : lecture ratée.
+        return RuleState::Unknown;
     } else if json.starts_with('{') {
         // Selon la version de PowerShell, un tableau d'un élément peut sortir comme un objet seul.
         serde_json::from_str::<RuleInfo>(json).map(|r| vec![r])
@@ -157,10 +168,41 @@ pub fn rule_state() -> RuleState {
 /// (une fenêtre UAC, une seule fois par exécutable) au lieu d'attendre un clic dans la fenêtre.
 /// Renvoie `true` si la règle vient d'être créée.
 pub fn ensure_allowed() -> Result<bool, String> {
-    match rule_state() {
-        RuleState::Allowed | RuleState::Unknown => Ok(false),
-        RuleState::Blocked | RuleState::Missing => allow_this_executable().map(|()| true),
+    ensure_allowed_with(
+        rule_state,
+        allow_this_executable,
+        std::thread::sleep,
+        CHECK_ATTEMPTS,
+        CHECK_RETRY_DELAY,
+    )
+}
+
+/// Lectures tentées au lancement avant de renoncer (sans rien demander).
+pub const CHECK_ATTEMPTS: u32 = 4;
+/// Attente entre deux lectures : le pare-feu finit de démarrer avec la session Windows.
+pub const CHECK_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Cœur testable de [`ensure_allowed`] : relit tant que le pare-feu ne répond pas, et ne
+/// demande l'administrateur que sur un état lu avec certitude (`Missing` ou `Blocked`).
+pub fn ensure_allowed_with(
+    mut read: impl FnMut() -> RuleState,
+    allow: impl FnOnce() -> Result<(), String>,
+    mut sleep: impl FnMut(std::time::Duration),
+    attempts: u32,
+    delay: std::time::Duration,
+) -> Result<bool, String> {
+    for attempt in 0..attempts.max(1) {
+        if attempt > 0 {
+            sleep(delay);
+        }
+        match read() {
+            RuleState::Allowed => return Ok(false),
+            RuleState::Blocked | RuleState::Missing => return allow().map(|()| true),
+            RuleState::Unknown => {}
+        }
     }
+    tracing::warn!("pare-feu illisible au lancement : aucune demande d'autorisation");
+    Ok(false)
 }
 
 /// Demande l'élévation (fenêtre UAC) et applique la règle. Bloquant jusqu'à la fin du script.
@@ -276,10 +318,84 @@ mod tests {
         );
         assert_eq!(parse_state(&one, EXE), RuleState::Allowed);
         assert_eq!(parse_state("[]", EXE), RuleState::Missing);
-        assert_eq!(parse_state("", EXE), RuleState::Missing);
+        // Rien en sortie : PowerShell a échoué, pas « aucune règle ».
+        assert_eq!(parse_state("", EXE), RuleState::Unknown);
+        assert_eq!(
+            parse_state("PARE-FEU INDISPONIBLE", EXE),
+            RuleState::Unknown
+        );
         assert_eq!(
             parse_state("Get-NetFirewallRule : erreur", EXE),
             RuleState::Unknown
+        );
+    }
+
+    #[test]
+    fn check_script_refuses_to_answer_while_the_firewall_is_starting() {
+        let s = check_script(EXE);
+        assert!(
+            s.contains("MpsSvc") && s.contains("Get-NetFirewallProfile"),
+            "{s}"
+        );
+        assert!(s.contains("PARE-FEU INDISPONIBLE"));
+    }
+
+    #[test]
+    fn other_copies_keep_their_rule() {
+        // Édition portable : un nom de fichier par version. La règle d'une autre copie encore
+        // présente sur le disque ne doit pas être supprimée.
+        let s = firewall_script(EXE);
+        assert!(s.contains("Test-Path -LiteralPath $p"), "{s}");
+        assert!(!s.contains(&format!(
+            "Get-NetFirewallRule -DisplayName {} -ErrorAction SilentlyContinue | Remove-NetFirewallRule",
+            ps_quote(RULE_NAME)
+        )));
+    }
+
+    fn run(states: &[RuleState]) -> (Result<bool, String>, usize, usize) {
+        let mut it = states.iter().copied();
+        let mut reads = 0;
+        let mut sleeps = 0;
+        let asked = std::cell::Cell::new(0);
+        let r = ensure_allowed_with(
+            || {
+                reads += 1;
+                it.next().unwrap_or(RuleState::Unknown)
+            },
+            || {
+                asked.set(asked.get() + 1);
+                Ok(())
+            },
+            |_| sleeps += 1,
+            4,
+            std::time::Duration::ZERO,
+        );
+        let _ = sleeps;
+        (r, reads, asked.get())
+    }
+
+    #[test]
+    fn rule_in_place_never_asks() {
+        assert_eq!(run(&[RuleState::Allowed]), (Ok(false), 1, 0));
+    }
+
+    #[test]
+    fn firewall_still_starting_is_read_again_then_never_asks() {
+        // Démarrage du PC : illisible, puis la règle est bien là.
+        assert_eq!(
+            run(&[RuleState::Unknown, RuleState::Unknown, RuleState::Allowed]),
+            (Ok(false), 3, 0)
+        );
+        // Toujours illisible : on abandonne sans fenêtre.
+        assert_eq!(run(&[]), (Ok(false), 4, 0));
+    }
+
+    #[test]
+    fn asks_once_only_when_the_rule_is_really_missing() {
+        assert_eq!(run(&[RuleState::Missing]), (Ok(true), 1, 1));
+        assert_eq!(
+            run(&[RuleState::Unknown, RuleState::Blocked]),
+            (Ok(true), 2, 1)
         );
     }
 
